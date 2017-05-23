@@ -13,8 +13,7 @@ var controls;
 var camera = new THREE.PerspectiveCamera(45, getSurfaceWidth() / getSurfaceHeight(), 0.1, 500);
 var raycaster = new THREE.Raycaster();
 
-var mousePos = new THREE.Vector2(), INTERSECTED;
-var clickPos = new THREE.Vector2(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+var mousePos = new THREE.Vector2(), INTERSECTED, doRaycast = false;
 
 var scene = new THREE.Scene();
 
@@ -59,30 +58,32 @@ var update = function () {
 }
 
 var render = function () {
-	raycaster.setFromCamera(mousePos, camera);
-	var intersects = raycaster.intersectObjects(scene.children);
-	if (intersects.length > 0) {
-		if (INTERSECTED != intersects[0].object) {
-			if (INTERSECTED) INTERSECTED.material.color.setHex(INTERSECTED.currentColor);
-			INTERSECTED = intersects[0].object;
-			INTERSECTED.currentColor = INTERSECTED.material.color.getHex();
-			INTERSECTED.material.color.setHex(0x0000ff);
-		}
-	} else {
-		if (INTERSECTED) INTERSECTED.material.color.setHex(INTERSECTED.currentColor);
-		INTERSECTED = null;
-	}
-	if (Number.isFinite(clickPos.x)) {
+	if (doRaycast) {
 		raycaster.setFromCamera(mousePos, camera);
 		var intersects = raycaster.intersectObjects(scene.children);
 		if (intersects.length > 0) {
-			setTimeout(()=>{
-				var p = intersects[0].object.arrayPosition;
-				voxels = floodFill(voxels, p[0],p[1],p[2]);
-				loadScene();
-			},0);
+			if (INTERSECTED != intersects[0].object) {
+				if (INTERSECTED) INTERSECTED.material.color.setHex(INTERSECTED.currentColor);
+				INTERSECTED = intersects[0].object;
+				INTERSECTED.currentColor = INTERSECTED.material.color.getHex();
+				INTERSECTED.material.color.setHex(0x0000ff);
+			}
+		} else {
+			if (INTERSECTED) INTERSECTED.material.color.setHex(INTERSECTED.currentColor);
+			INTERSECTED = null;
 		}
-		clickPos.x=clickPos.y=Number.POSITIVE_INFINITY;
+		if (doRaycast == "click") {
+			if (intersects.length > 0) {
+				setTimeout(() => {
+					var p = intersects[0].object.arrayPosition;
+					if (p) {
+						voxels = floodFill(voxels, p[0], p[1], p[2]);
+						loadScene();
+					}
+				}, 0);
+			}
+		}
+		doRaycast = false;
 	}
 	renderer.render(scene, camera);
 };
@@ -120,14 +121,20 @@ init();
 loopSimple();
 
 renderSurface.addEventListener('mousemove', (event) => {
-	mousePos.x = ((event.pageX - renderSurface.offsetLeft) / getSurfaceWidth()) * 2 - 1;
-	mousePos.y = - ((event.pageY - renderSurface.offsetTop) / getSurfaceHeight()) * 2 + 1;
+	setMousePosition(event, "move");
 }, false);
 renderSurface.addEventListener('click', (event) => {
-	clickPos.x = ((event.pageX - renderSurface.offsetLeft) / getSurfaceWidth()) * 2 - 1;
-	clickPos.y = - ((event.pageY - renderSurface.offsetTop) / getSurfaceHeight()) * 2 + 1;
-
+	setMousePosition(event, "click");
 }, false);
+
+function setMousePosition(event, type) {
+	if (event.ctrlKey) {
+		if (doRaycast!="click") doRaycast = type;
+		mousePos.x = ((event.pageX - renderSurface.offsetLeft) / getSurfaceWidth()) * 2 - 1;
+		mousePos.y = - ((event.pageY - renderSurface.offsetTop) / getSurfaceHeight()) * 2 + 1;
+	}
+}
+
 window.addEventListener('resize', resize, false);
 
 var voxels = [];
@@ -166,7 +173,7 @@ function loadScene() {
 	var ox = (voxelMax[0] - voxelMin[0]) / 2 + voxelMin[0];
 	var oy = (voxelMax[1] - voxelMin[1]) / 2 + voxelMin[1];
 	var oz = (voxelMax[2] - voxelMin[2]) / 2 + voxelMin[2];
-	// var globalMesh = new THREE.Mesh();
+	var globalGeometry = new THREE.Geometry();
 	voxels.forEach((vx, x) => {
 		var red = incContrast(x, voxelMin[0], voxelMax[0], 30, 225);
 		if (vx) vx.forEach((vy, y) => {
@@ -174,29 +181,29 @@ function loadScene() {
 			if (vy) vy.forEach((vz, z) => {
 				var blue = incContrast(z, voxelMin[2], voxelMax[2], 30, 225);
 				if (vz > 0) {
-					//var color = (red << 16) + (green << 8) + blue;
-					var color = incContrast(vz, minInVoxel, maxInVoxel, 50, 255)<<8;
+					var color = (red << 16) + (green << 8) + blue;
+					//var color = incContrast(vz, minInVoxel, maxInVoxel, 50, 255) << 8;
 					//var color = (vz>1?0xff0000:((red << 16) + (green << 8) + blue));
 					if (!materialMap[color]) {
 						materialMap[color] = new THREE.MeshBasicMaterial({ color: color });
 					}
 					let c = new THREE.Mesh(geometry, materialMap[color]);
-					c["arrayPosition"] = [x,y,z];
+					c["arrayPosition"] = [x, y, z];
 					c.position.set(x - ox, y - oy, z - oz);
-					newScene.add(c);
-					// THREE.GeometryUtils.merge(globalMesh, c);
+					//newScene.add(c);
+					globalGeometry.mergeMesh(c);
 				}
 			});
 		});
 	});
-	// newScene.add(globalMesh);
+	newScene.add(new THREE.Mesh(globalGeometry));
 	scene = newScene;
 	controls.userPanSpeed = Math.max(maxInVoxel) * 0.004
 
 }
 
 function incContrast(v, minV, maxV, min, max) {
-	return (minV==maxV?1:((v - minV) / (maxV - minV))) * (max - min) + min;
+	return (minV == maxV ? 1 : ((v - minV) / (maxV - minV))) * (max - min) + min;
 }
 
 function clean() {
@@ -319,6 +326,20 @@ document.getElementById('start').onclick = function () {
 	toVoxels(file, document.getElementById('raster').value, document.getElementById('gauss').checked);
 };
 
+document.getElementById('save').onclick = function () {
+	var text = "";
+	voxels.forEach((vx, x) => {
+		if (vx) vx.forEach((vy, y) => {
+			if (vy) vy.forEach((vz, z) => {
+				if (vz > 0.001) {
+					text+="v "+x+" "+y+" "+z+"\n";
+				}
+			});
+		});
+	});
+	download("voxel.obj", text);
+};
+
 // document.getElementById('save').onclick = function () {
 // 	var file = document.getElementById('outfile').files[0];
 // 	if (!file) {
@@ -363,6 +384,21 @@ function readSomeLines(file, forEachLine, onComplete) {
 		var slice = file.slice(offset, offset + CHUNK_SIZE);
 		fr.readAsArrayBuffer(slice);
 	}
+}
+
+function download(filename, text) {
+  var element = document.createElement('a');
+  element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+  element.setAttribute('download', filename);
+
+  element.style.display = 'none';
+  document.body.appendChild(element);
+
+	
+
+  element.click();
+
+  document.body.removeChild(element);
 }
 
 var PI2 = Math.PI * 2;
@@ -547,7 +583,7 @@ function floodFill(f, x, y, z) {
 		if (vx) vx.forEach((vy, y) => {
 			out[x][y] = [];
 			if (vy) vy.forEach((vz, z) => {
-				if(vz>0)out[x][y][z] = 1;
+				if (vz > 0) out[x][y][z] = 1;
 			});
 		});
 	});
