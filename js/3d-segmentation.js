@@ -140,7 +140,9 @@ window.addEventListener('resize', resize, false);
 var voxels = [];
 var rasterSize;
 
-function loadScene() {
+function loadScene(options=null) {
+	var colorXYZ = !options||options.color!="sum";
+
 	var newScene = new THREE.Scene();
 	var materialMap = [];
 
@@ -173,7 +175,7 @@ function loadScene() {
 	var ox = (voxelMax[0] - voxelMin[0]) / 2 + voxelMin[0];
 	var oy = (voxelMax[1] - voxelMin[1]) / 2 + voxelMin[1];
 	var oz = (voxelMax[2] - voxelMin[2]) / 2 + voxelMin[2];
-	var globalGeometry = new THREE.Geometry();
+	//var globalGeometry = new THREE.Geometry();
 	voxels.forEach((vx, x) => {
 		var red = incContrast(x, voxelMin[0], voxelMax[0], 30, 225);
 		if (vx) vx.forEach((vy, y) => {
@@ -181,7 +183,9 @@ function loadScene() {
 			if (vy) vy.forEach((vz, z) => {
 				var blue = incContrast(z, voxelMin[2], voxelMax[2], 30, 225);
 				if (vz > 0) {
-					var color = (red << 16) + (green << 8) + blue;
+					var color;
+					if(colorXYZ)color = (red << 16) + (green << 8) + blue;
+					else color = (vz>1?0xff0000:((red << 16) + (green << 8) + blue));
 					//var color = incContrast(vz, minInVoxel, maxInVoxel, 50, 255) << 8;
 					//var color = (vz>1?0xff0000:((red << 16) + (green << 8) + blue));
 					if (!materialMap[color]) {
@@ -190,20 +194,20 @@ function loadScene() {
 					let c = new THREE.Mesh(geometry, materialMap[color]);
 					c["arrayPosition"] = [x, y, z];
 					c.position.set(x - ox, y - oy, z - oz);
-					//newScene.add(c);
-					globalGeometry.mergeMesh(c);
+					newScene.add(c);
+					//globalGeometry.mergeMesh(c);
 				}
 			});
 		});
 	});
-	newScene.add(new THREE.Mesh(globalGeometry));
+	//newScene.add(new THREE.Mesh(globalGeometry));
 	scene = newScene;
 	controls.userPanSpeed = Math.max(maxInVoxel) * 0.004
 
 }
 
 function incContrast(v, minV, maxV, min, max) {
-	return (minV == maxV ? 1 : ((v - minV) / (maxV - minV))) * (max - min) + min;
+	return Math.floor((minV == maxV ? 1 : ((v - minV) / (maxV - minV))) * (max - min) + min);
 }
 
 function clean() {
@@ -326,6 +330,12 @@ document.getElementById('start').onclick = function () {
 	toVoxels(file, document.getElementById('raster').value, document.getElementById('gauss').checked);
 };
 
+document.getElementsByName('color').forEach((e)=>{
+	e.onclick= function(){
+		loadScene({color:e.value});
+	}
+})
+
 document.getElementById('save').onclick = function () {
 	var text = "";
 	voxels.forEach((vx, x) => {
@@ -339,16 +349,6 @@ document.getElementById('save').onclick = function () {
 	});
 	download("voxel.obj", text);
 };
-
-// document.getElementById('save').onclick = function () {
-// 	var file = document.getElementById('outfile').files[0];
-// 	if (!file) {
-// 		console.log('No file selected.');
-// 		return;
-// 	}
-// 	toVoxels(file, document.getElementById('raster').value, document.getElementById('gauss').checked);
-// };
-
 
 function readSomeLines(file, forEachLine, onComplete) {
 	var CHUNK_SIZE = 20000; // 50kb, arbitrarily chosen.
