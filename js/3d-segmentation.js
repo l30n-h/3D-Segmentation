@@ -22,6 +22,52 @@ var materialGreen = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
 var materialRed = new THREE.MeshBasicMaterial({ color: 0xff0000 });
 var cube;
 
+
+
+var VoxelMap = function () {
+
+	var voxel = new Map();
+
+	this.get = (x, y, z) => {
+		var v = voxel.get(hash(x, y, z));
+		return v;
+	}
+
+	this.set = (x, y, z, v) => {
+		voxel.set(hash(x, y, z), v);
+	}
+
+	this.remove = (key) => {
+		voxel.delete(key);
+	}
+
+	this.clear = () => {
+		voxel.clear();
+	}
+
+	this.entries = () => {
+		return voxel.entries();
+	}
+
+	this.keys = () => {
+		return voxel.keys();
+	}
+
+	this.getPosition = (key) => {
+		var s = key.split("/");
+		if (!s || s.length < 3) return null;
+		return {
+			x: parseInt(s[0]),
+			y: parseInt(s[1]),
+			z: parseInt(s[2])
+		}
+	}
+
+	function hash(x, y, z) {
+		return x + "/" + y + "/" + z;
+	}
+}
+
 var init = function () {
 	controls = new THREE.OrbitControls(camera, renderer.domElement);
 	controls.userPanSpeed = 0.02;
@@ -77,7 +123,11 @@ var render = function () {
 				setTimeout(() => {
 					var p = intersects[0].object.arrayPosition;
 					if (p) {
-						voxels = floodFill(voxels, p[0], p[1], p[2]);
+						var marked = floodFill(voxels, p[0], p[1], p[2]);
+						for (var key of marked.keys()) {
+							p = marked.getPosition(key);
+							voxels.get(p.x, p.y, p.z)["marked"] = true;
+						}
 						loadScene();
 					}
 				}, 0);
@@ -129,7 +179,7 @@ renderSurface.addEventListener('click', (event) => {
 
 function setMousePosition(event, type) {
 	if (event.ctrlKey) {
-		if (doRaycast!="click") doRaycast = type;
+		if (doRaycast != "click") doRaycast = type;
 		mousePos.x = ((event.pageX - renderSurface.offsetLeft) / getSurfaceWidth()) * 2 - 1;
 		mousePos.y = - ((event.pageY - renderSurface.offsetTop) / getSurfaceHeight()) * 2 + 1;
 	}
@@ -137,11 +187,11 @@ function setMousePosition(event, type) {
 
 window.addEventListener('resize', resize, false);
 
-var voxels = [];
+var voxels = new VoxelMap();
 var rasterSize;
 
-function loadScene(options=null) {
-	var colorXYZ = !options||options.color!="sum";
+function loadScene(options = null) {
+	var colorXYZ = !options || options.color != "sum";
 
 	var newScene = new THREE.Scene();
 	var materialMap = [];
@@ -150,24 +200,24 @@ function loadScene(options=null) {
 	var maxInVoxel = Number.NEGATIVE_INFINITY;
 	var voxelMin = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
 	var voxelMax = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
-	voxels.forEach((vx, x) => {
-		if (vx) vx.forEach((vy, y) => {
-			if (vy) vy.forEach((vz, z) => {
-				if (vz > 0.001) {
-					voxelMin[0] = Math.min(voxelMin[0], x);
-					voxelMin[1] = Math.min(voxelMin[1], y);
-					voxelMin[2] = Math.min(voxelMin[2], z);
-					voxelMax[0] = Math.max(voxelMax[0], x);
-					voxelMax[1] = Math.max(voxelMax[1], y);
-					voxelMax[2] = Math.max(voxelMax[2], z);
-					minInVoxel = Math.min(minInVoxel, vz);
-					maxInVoxel = Math.max(maxInVoxel, vz);
-				} else {
-					voxels[x][y][z] = 0;
-				}
-			});
-		});
-	});
+
+	for (var e of voxels.entries()) {
+		var key = e[0];
+		var v = e[1].value;
+		var p = voxels.getPosition(key);
+		if (v > 0.001) {
+			voxelMin[0] = Math.min(voxelMin[0], p.x);
+			voxelMin[1] = Math.min(voxelMin[1], p.y);
+			voxelMin[2] = Math.min(voxelMin[2], p.z);
+			voxelMax[0] = Math.max(voxelMax[0], p.x);
+			voxelMax[1] = Math.max(voxelMax[1], p.y);
+			voxelMax[2] = Math.max(voxelMax[2], p.z);
+			minInVoxel = Math.min(minInVoxel, v);
+			maxInVoxel = Math.max(maxInVoxel, v);
+		} else {
+			voxels.remove(key)
+		}
+	}
 	console.log(minInVoxel);
 	console.log(maxInVoxel);
 	console.log(voxelMin);
@@ -175,32 +225,32 @@ function loadScene(options=null) {
 	var ox = (voxelMax[0] - voxelMin[0]) / 2 + voxelMin[0];
 	var oy = (voxelMax[1] - voxelMin[1]) / 2 + voxelMin[1];
 	var oz = (voxelMax[2] - voxelMin[2]) / 2 + voxelMin[2];
-	//var globalGeometry = new THREE.Geometry();
-	voxels.forEach((vx, x) => {
-		var red = incContrast(x, voxelMin[0], voxelMax[0], 30, 225);
-		if (vx) vx.forEach((vy, y) => {
-			var green = incContrast(y, voxelMin[1], voxelMax[1], 30, 225);
-			if (vy) vy.forEach((vz, z) => {
-				var blue = incContrast(z, voxelMin[2], voxelMax[2], 30, 225);
-				if (vz > 0) {
-					var color;
-					if(colorXYZ)color = (red << 16) + (green << 8) + blue;
-					else color = (vz>1?0xff0000:((red << 16) + (green << 8) + blue));
-					//var color = incContrast(vz, minInVoxel, maxInVoxel, 50, 255) << 8;
-					//var color = (vz>1?0xff0000:((red << 16) + (green << 8) + blue));
-					if (!materialMap[color]) {
-						materialMap[color] = new THREE.MeshBasicMaterial({ color: color });
-					}
-					let c = new THREE.Mesh(geometry, materialMap[color]);
-					c["arrayPosition"] = [x, y, z];
-					c.position.set(x - ox, y - oy, z - oz);
-					newScene.add(c);
-					//globalGeometry.mergeMesh(c);
-				}
-			});
-		});
-	});
-	//newScene.add(new THREE.Mesh(globalGeometry));
+
+	for (var e of voxels.entries()) {
+		var key = e[0];
+		var value = e[1];
+		var v = e[1].value;
+		var p = voxels.getPosition(key);
+		var red = incContrast(p.x, voxelMin[0], voxelMax[0], 30, 225);
+		var green = incContrast(p.y, voxelMin[1], voxelMax[1], 30, 225);
+		var blue = incContrast(p.z, voxelMin[2], voxelMax[2], 30, 225);
+		if (v > 0) {
+			var color;
+			//if(marked)
+			if (colorXYZ) color = (red << 16) + (green << 8) + blue;
+			else color = (v > 1 ? 0xff0000 : ((red << 16) + (green << 8) + blue));
+			if (value.marked) color = 255 * 255 * 255;
+			//var color = incContrast(vz, minInVoxel, maxInVoxel, 50, 255) << 8;
+			//var color = (vz>1?0xff0000:((red << 16) + (green << 8) + blue));
+			if (!materialMap[color]) {
+				materialMap[color] = new THREE.MeshBasicMaterial({ color: color });
+			}
+			let c = new THREE.Mesh(geometry, materialMap[color]);
+			c["arrayPosition"] = [p.x, p.y, p.z];
+			c.position.set(p.x - ox, p.y - oy, p.z - oz);
+			newScene.add(c);
+		}
+	}
 	scene = newScene;
 	controls.userPanSpeed = Math.max(maxInVoxel) * 0.004
 
@@ -211,24 +261,20 @@ function incContrast(v, minV, maxV, min, max) {
 }
 
 function clean() {
-	voxels = [];
+	voxels = new VoxelMap();
 }
 
 function gauss3D(voxels, size) {
 	function getValue(voxels, x, y, z) {
-		var arr = voxels[x];
-		if (!arr) return 0;
-		var arr = arr[y];
-		if (!arr) return 0;
-		return arr[z] || 0;
+		var v = voxels.get(x, y, z);
+		if (!v || !v.value) return 0;
+		return v.value;
 	}
-	var nvoxels = [];
+	var nvoxels = new VoxelMap();
 	var kernel = toTensor([1, 2, 1]);
 	var kh = Math.floor(kernel.length / 2);
 	for (var x = 0; x < size; x++) {
-		nvoxels[x] = [];
 		for (var y = 0; y < size; y++) {
-			nvoxels[x][y] = [];
 			for (var z = 0; z < size; z++) {
 				var sum = 0;
 				kernel.forEach((vx, kx) => {
@@ -238,7 +284,7 @@ function gauss3D(voxels, size) {
 						});
 					});
 				});
-				if (sum > 0) nvoxels[x][y][z] = sum;
+				if (sum > 0) nvoxels.set(x, y, z, sum);
 			}
 		}
 	}
@@ -280,18 +326,8 @@ var toVoxels = function (file, rSize, gauss) {
 		}
 	}, function onComplete() {
 		var dif = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
-		var nvoxels = [];
-		for (var x = 0; x < rasterSize; x++) {
-			nvoxels[x] = [];
-			for (var y = 0; y < rasterSize; y++) {
-				nvoxels[x][y] = [];
-				for (var z = 0; z < rasterSize; z++) {
-					nvoxels[x][y][z] = 0;
-				}
-			}
-		}
+		var nvoxels = new VoxelMap();
 		var fac = (rasterSize - 1) / dif;
-		//var nvoxels = [];
 		readSomeLines(file, function (line) {
 			var match = vertexMatcher.exec(line)
 			if (match) {
@@ -300,7 +336,9 @@ var toVoxels = function (file, rSize, gauss) {
 					var v = parseFloat(match[i + 1]);
 					a[i] = Math.floor((v - min[i]) * fac);
 				}
-				nvoxels[a[0]][a[1]][a[2]]++;
+				var v = nvoxels.get(a[0], a[1], a[2]);
+				if (v) v.value++;
+				else nvoxels.set(a[0], a[1], a[2], { value: 1 });
 			}
 		}, function onComplete() {
 			console.log('read done');
@@ -309,10 +347,15 @@ var toVoxels = function (file, rSize, gauss) {
 				//nvoxels = toAmplitude(FFT3d(FFT3d(nvoxels, rasterSize,rasterSize,rasterSize),rasterSize,rasterSize,rasterSize, true));
 				if (gauss) {
 					console.log('gaussfilter start');
-					nvoxels = gauss3D(nvoxels, rasterSize);
+					var fvoxels = gauss3D(nvoxels, rasterSize);
+					nvoxels.clear();
+					for (var e of fvoxels.entries()) {
+						var v = e[1];
+						var p = fvoxels.getPosition(e[0]);
+						if (v > 0.001) nvoxels.set(p.x, p.y, p.z, { value: v });
+					}
 					console.log('gaussfilter done');
 				}
-				nvoxels = highlightEdges(nvoxels);
 				voxels = nvoxels;
 				loadScene();
 			}, 0);
@@ -330,23 +373,22 @@ document.getElementById('start').onclick = function () {
 	toVoxels(file, document.getElementById('raster').value, document.getElementById('gauss').checked);
 };
 
-document.getElementsByName('color').forEach((e)=>{
-	e.onclick= function(){
-		loadScene({color:e.value});
+document.getElementsByName('color').forEach((e) => {
+	e.onclick = function () {
+		loadScene({ color: e.value });
 	}
 })
 
 document.getElementById('save').onclick = function () {
 	var text = "";
-	voxels.forEach((vx, x) => {
-		if (vx) vx.forEach((vy, y) => {
-			if (vy) vy.forEach((vz, z) => {
-				if (vz > 0.001) {
-					text+="v "+x+" "+y+" "+z+"\n";
-				}
-			});
-		});
-	});
+	for (var e of voxels.entries()) {
+		var key = e[0];
+		var v = e[1];
+		var p = voxels.getPosition(key);
+		if (v > 0.001) {
+			text += "v " + x + " " + y + " " + z + "\n";
+		}
+	}
 	download("voxel.obj", text);
 };
 
@@ -387,18 +429,18 @@ function readSomeLines(file, forEachLine, onComplete) {
 }
 
 function download(filename, text) {
-  var element = document.createElement('a');
-  element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
-  element.setAttribute('download', filename);
+	var element = document.createElement('a');
+	element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+	element.setAttribute('download', filename);
 
-  element.style.display = 'none';
-  document.body.appendChild(element);
+	element.style.display = 'none';
+	document.body.appendChild(element);
 
-	
 
-  element.click();
 
-  document.body.removeChild(element);
+	element.click();
+
+	document.body.removeChild(element);
 }
 
 var PI2 = Math.PI * 2;
@@ -447,7 +489,13 @@ function _FFT(f, dir) {
 }
 
 function FFT3d(src, M, N, O, inverse = false) {
-	function getValue(src, x, y, z, i) {
+	function getValue(x, y, z, i) {
+		if (!Array.isArray(src)) {
+			if(i==1) return 0;
+			var v = src.get(x, y, z);
+			if (v && v.value) return v.value;
+			return 0;
+		}
 		if (!inverse && i == 1) return 0;
 		var arr = src[x];
 		if (!arr) return 0;
@@ -474,8 +522,8 @@ function FFT3d(src, M, N, O, inverse = false) {
 	for (var z = 0; z < O; z++) {
 		for (var y = 0; y < N; y++) {
 			for (var x = 0; x < M; x++) {
-				rows[x][0] = getValue(src, x, y, z, 0);
-				rows[x][1] = getValue(src, x, y, z, 1);
+				rows[x][0] = getValue(x, y, z, 0);
+				rows[x][1] = getValue(x, y, z, 1);
 			}
 			rows = FFT(rows, inverse);
 			for (var x = 0; x < M; x++) {
@@ -545,31 +593,22 @@ function nextPowerOf2(a) {
 	return b;
 }
 
-function highlightEdges(f) {
-	var out = [];
-	for (var x = 0; x < f.length; x++) {
-		out[x] = [];
-		for (var y = 0; y < f[x].length; y++) {
-			out[x][y] = [];
-			for (var z = 0; z < f[x][y].length; z++) {
-				if (!f[x][y][z]) {
-					out[x][y][z] = 0;
-				}
-				else out[x][y][z] = 27 - count8Neighbour(f, x, y, z);
-			}
-		}
+function count8Neighbour(f) {
+	var marked = new VoxelMap();
+	for (var key of f.keys()) {
+		p = f.getPosition(key);
+		marked.set(p.x, p.y, p.z, count8NeighbourAt(f, p.x, p.y, p.z));
 	}
-	return out;
+	return marked;
 }
 
-function count8Neighbour(f, x, y, z) {
+function count8NeighbourAt(f, x, y, z) {
 	var n = 0;
-	for (var nx = x - 1; nx < x + 1; nx++) {
-		for (var ny = y - 1; ny < y + 1; ny++) {
-			for (var nz = z - 1; nz < z + 1; nz++) {
-				if (f[nx] && f[nx][ny] && f[nx][ny][nz] > 0) {
-					n++;
-				}
+	for (var nx = x - 1; nx <= x + 1; nx++) {
+		for (var ny = y - 1; ny <= y + 1; ny++) {
+			for (var nz = z - 1; nz <= z + 1; nz++) {
+				var v = f.get(p.x, p.y, p.z);
+				if (v && v.value > 0) n++;
 			}
 		}
 	}
@@ -577,29 +616,93 @@ function count8Neighbour(f, x, y, z) {
 }
 
 function floodFill(f, x, y, z) {
-	var out = []
-	f.forEach((vx, x) => {
-		out[x] = [];
-		if (vx) vx.forEach((vy, y) => {
-			out[x][y] = [];
-			if (vy) vy.forEach((vz, z) => {
-				if (vz > 0) out[x][y][z] = 1;
-			});
-		});
-	});
-	_floodFill(f, out, x, y, z);
-	return out;
-}
-
-function _floodFill(f, marked, x, y, z) {
-	if (f[x] && f[x][y] && f[x][y][z] > 0 && marked[x][y][z] <= 1) {
-		marked[x][y][z] = 10;
-		for (var nx = x - 1; nx < x + 1; nx++) {
-			for (var ny = y - 1; ny < y + 1; ny++) {
-				for (var nz = z - 1; nz < z + 1; nz++) {
-					_floodFill(f, marked, nx, ny, nz)
+	var marked = new VoxelMap();
+	var stack = [];
+	stack.push({ x: x, y: y, z: z });
+	while (stack.length > 0) {
+		var p = stack.pop();
+		var v = f.get(p.x, p.y, p.z);
+		if (v && v.value > 0 && !marked.get(p.x, p.y, p.z)) {
+			marked.set(p.x, p.y, p.z, true);
+			for (var nx = p.x - 1; nx <= p.x + 1; nx++) {
+				for (var ny = p.y - 1; ny <= p.y + 1; ny++) {
+					for (var nz = p.z - 1; nz <= p.z + 1; nz++) {
+						if (nx != p.x || ny != p.y || nz != p.z) {
+							stack.push({ x: nx, y: ny, z: nz });
+						}
+					}
 				}
 			}
 		}
 	}
+	return marked;
 }
+
+
+/*setTimeout(() => {
+	console.log("start")
+	var vm = new VoxelMap();
+	vm.set(0,0,0,"a");
+	vm.set(0,18,0,"b");
+	vm.set(10,0,97,"c");
+	vm.set(14,5,33,"d");
+	console.log(vm.keys());
+	for(var e of vm.entries()){
+		console.log(e);
+	}
+	var co = 100;
+	for (var x = 0; x < co; x++) {
+		for (var y = 0; y < co; y++) {
+			for (var z = 0; z < co; z++) {
+				vm.get(x, y, z)
+			}
+		}
+	}
+	console.log("done")
+}, 0);
+*/
+/*
+var Octree = function (s) {
+	var size = nextPowerOf2(s);
+
+	var Node = function (p, s) {
+		var size = s;
+		var pivot = p+size/2;
+		var data=null;
+		var nodes;
+
+		var get = (x,y,z) => {
+			if(!nodes) return null;
+			if(size<=1) return data;
+			var index = getIndex(x,y,z);
+			if(!nodes[index])return null;
+			return nodes[index].get(x,y,z);
+			
+		}
+
+		function getIndex(x,y,z){
+			return ((x < pivot ? 0 : 1) + (y > pivot ? 0 : 4) + (z < pivot ? 0: 2));
+		}
+	}
+
+	var root = new Node(0,size/2);
+
+
+	var get = (x,y,z) => {
+		if(isInBounds(x,y,z)){
+			return root.get(x,y,z);
+		}
+		return undefined;
+	}
+
+	var isInBounds = (x,y,z) => {
+		return x>=0 && x<size && y>=0 && y<size && z>=0 && z<size;
+	}
+
+	function nextPowerOf2(a) {
+		var b = 1;
+		while (b < a) b = b << 1;
+		return b;
+	}
+}
+*/
