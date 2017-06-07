@@ -1,3 +1,5 @@
+'use strict';
+
 var renderSurface = document.getElementById("renderSurface");
 function getSurfaceWidth() {
 	return renderSurface.offsetWidth;
@@ -17,11 +19,7 @@ var mousePos = new THREE.Vector2(), INTERSECTED, doRaycast = false;
 
 var scene = new THREE.Scene();
 
-var geometry = new THREE.BoxGeometry(1, 1, 1);
-var materialGreen = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-var materialRed = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-var cube;
-
+var needsRerendering = true;
 
 
 var VoxelMap = function () {
@@ -39,6 +37,10 @@ var VoxelMap = function () {
 
 	this.remove = (key) => {
 		voxel.delete(key);
+	}
+
+	this.size = () => {
+		return voxel.size;
 	}
 
 	this.clear = () => {
@@ -68,21 +70,70 @@ var VoxelMap = function () {
 	}
 }
 
+var VertexGeometry = function () {
+
+	var geometry = new THREE.Geometry();
+	var geom = new THREE.BoxGeometry(1, 1, 1);
+	var matrix = new THREE.Matrix4();
+	var color = new THREE.Color();
+	var defaultMaterial = new THREE.MeshBasicMaterial({ vertexColors: THREE.VertexColors });
+
+	this.addCube = (position, hexColor) => {
+		matrix.setPosition(position);
+		applyVertexColors(geom, color.setHex(hexColor));
+		geometry.merge(geom, matrix);
+	}
+
+	this.dispose = () => {
+		geom.dispose();
+		defaultMaterial.dispose();
+	}
+
+	this.drawnObject = () => {
+		return new THREE.Mesh(geometry, defaultMaterial);
+	}
+
+	function applyVertexColors(g, c) {
+		g.faces.forEach((f) => {
+			var n = (f instanceof THREE.Face3) ? 3 : 4;
+			for (var j = 0; j < n; j++) {
+				f.vertexColors[j] = c;
+			}
+		});
+	}
+
+}
+
+function clearScene(){
+	for (var i = scene.children.length - 1; i >= 0; i--) {
+		var child = scene.children[i]
+		scene.remove(child);
+		if (child instanceof THREE.Mesh) {
+			child.geometry.dispose();
+			child.material.dispose();
+		}
+	}
+	needsRerendering = true;
+}
+
+
 var init = function () {
+	clearScene();
 	controls = new THREE.OrbitControls(camera, renderer.domElement);
+	controls.addEventListener('change', (e) => { needsRerendering = true; }, false);
 	controls.userPanSpeed = 0.02;
 	camera.position.z = 5;
 
-	var newScene = new THREE.Scene();
+	var vGeometry = new VertexGeometry();
+	var position = new THREE.Vector3();
 	var redX = 0;
 	for (let x = 0; x < 5; x++) {
 		var redY = 0;
 		for (let y = 0; y < 5; y++) {
 			var redZ = 0;
 			for (let z = 0; z < 5; z++) {
-				let c = new THREE.Mesh(geometry, redX + redY + redZ == 1 ? materialRed : materialGreen);
-				c.position.set(x, y, z);
-				newScene.add(c);
+				position.set(x, y, z);
+				vGeometry.addCube(position, redX + redY + redZ == 1 ? 0xff0000 : 0x00ff00)
 
 				redZ = (redZ + 1) % 2;
 			}
@@ -90,13 +141,18 @@ var init = function () {
 		}
 		redX = (redX + 1) % 2;
 	}
-	scene = newScene;
+	scene.add(vGeometry.drawnObject());
+	vGeometry.dispose();
+
+	needsRerendering = true;
 }
 
 var resize = function () {
 	camera.aspect = getSurfaceWidth() / getSurfaceHeight();
 	camera.updateProjectionMatrix();
 	renderer.setSize(getSurfaceWidth(), getSurfaceHeight());
+
+	needsRerendering = true;
 }
 
 var update = function () {
@@ -107,6 +163,7 @@ var render = function () {
 	if (doRaycast) {
 		raycaster.setFromCamera(mousePos, camera);
 		var intersects = raycaster.intersectObjects(scene.children);
+		console.log(intersects);
 		if (intersects.length > 0) {
 			if (INTERSECTED != intersects[0].object) {
 				if (INTERSECTED) INTERSECTED.material.color.setHex(INTERSECTED.currentColor);
@@ -134,8 +191,13 @@ var render = function () {
 			}
 		}
 		doRaycast = false;
+
+		needsRerendering = true;
 	}
-	renderer.render(scene, camera);
+	if (needsRerendering) {
+		renderer.render(scene, camera);
+		needsRerendering = false;
+	}
 };
 
 
@@ -191,10 +253,8 @@ var voxels = new VoxelMap();
 var rasterSize;
 
 function loadScene(options = null) {
+	clearScene();
 	var colorXYZ = !options || options.color != "sum";
-
-	var newScene = new THREE.Scene();
-	var materialMap = [];
 
 	var minInVoxel = Number.POSITIVE_INFINITY;
 	var maxInVoxel = Number.NEGATIVE_INFINITY;
@@ -226,6 +286,10 @@ function loadScene(options = null) {
 	var oy = (voxelMax[1] - voxelMin[1]) / 2 + voxelMin[1];
 	var oz = (voxelMax[2] - voxelMin[2]) / 2 + voxelMin[2];
 
+
+	var vGeometry = new VertexGeometry();
+	var position = new THREE.Vector3();
+
 	for (var e of voxels.entries()) {
 		var key = e[0];
 		var value = e[1];
@@ -242,18 +306,17 @@ function loadScene(options = null) {
 			if (value.marked) color = 255 * 255 * 255;
 			//var color = incContrast(vz, minInVoxel, maxInVoxel, 50, 255) << 8;
 			//var color = (vz>1?0xff0000:((red << 16) + (green << 8) + blue));
-			if (!materialMap[color]) {
-				materialMap[color] = new THREE.MeshBasicMaterial({ color: color });
-			}
-			let c = new THREE.Mesh(geometry, materialMap[color]);
-			c["arrayPosition"] = [p.x, p.y, p.z];
-			c.position.set(p.x - ox, p.y - oy, p.z - oz);
-			newScene.add(c);
+
+			position.set(p.x - ox, p.y - oy, p.z - oz);
+			vGeometry.addCube(position, color);
 		}
 	}
-	scene = newScene;
+	scene.add(vGeometry.drawnObject());
+	vGeometry.dispose();
+
 	controls.userPanSpeed = Math.max(maxInVoxel) * 0.004
 
+	needsRerendering = true;
 }
 
 function incContrast(v, minV, maxV, min, max) {
@@ -261,7 +324,9 @@ function incContrast(v, minV, maxV, min, max) {
 }
 
 function clean() {
-	voxels = new VoxelMap();
+	clearScene();
+	voxels.clear();
+	//voxels = new VoxelMap();
 }
 
 function gauss3D(voxels, size) {
@@ -345,6 +410,7 @@ var toVoxels = function (file, rSize, gauss) {
 			setTimeout(() => {
 				//nvoxels = toLog(toAmplitude(FFT3d(nvoxels, rasterSize,rasterSize,rasterSize)));
 				//nvoxels = toAmplitude(FFT3d(FFT3d(nvoxels, rasterSize,rasterSize,rasterSize),rasterSize,rasterSize,rasterSize, true));
+				console.log(nvoxels.size());
 				if (gauss) {
 					console.log('gaussfilter start');
 					var fvoxels = gauss3D(nvoxels, rasterSize);
@@ -491,7 +557,7 @@ function _FFT(f, dir) {
 function FFT3d(src, M, N, O, inverse = false) {
 	function getValue(x, y, z, i) {
 		if (!Array.isArray(src)) {
-			if(i==1) return 0;
+			if (i == 1) return 0;
 			var v = src.get(x, y, z);
 			if (v && v.value) return v.value;
 			return 0;
