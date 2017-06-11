@@ -8,21 +8,20 @@ function getSurfaceHeight() {
 	return renderSurface.offsetHeight;
 }
 var renderer = new THREE.WebGLRenderer();
+var camera = new THREE.PerspectiveCamera(45, getSurfaceWidth() / getSurfaceHeight(), 0.1, 500);
+var controls;
+var raycaster = new THREE.Raycaster();
+var mousePos = new THREE.Vector2(), INTERSECTED, doRaycast = false;
+var scene = new THREE.Scene();
+
 renderer.setSize(getSurfaceWidth(), getSurfaceHeight());
 renderSurface.appendChild(renderer.domElement);
 
-var controls;
-var camera = new THREE.PerspectiveCamera(45, getSurfaceWidth() / getSurfaceHeight(), 0.1, 500);
-var raycaster = new THREE.Raycaster();
-
-var mousePos = new THREE.Vector2(), INTERSECTED, doRaycast = false;
-
-var scene = new THREE.Scene();
-
 var needsRerendering = true;
+var boxSize = 0.95;
 
 
-var VoxelMap = function () {
+function VoxelMap() {
 
 	var voxel = new Map();
 
@@ -70,15 +69,13 @@ var VoxelMap = function () {
 	}
 }
 
-var boxSize = 0.9;
-
-var VertexGeometry = function () {
+function VertexGeometry() {
 
 	var geometry = new THREE.Geometry();
 	var geom = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
+	var defaultMaterial = new THREE.MeshBasicMaterial({ vertexColors: THREE.FaceColors });
 	var matrix = new THREE.Matrix4();
 	var color = new THREE.Color();
-	var defaultMaterial = new THREE.MeshBasicMaterial({ vertexColors: THREE.VertexColors });
 
 	this.addCube = (position, hexColor) => {
 		matrix.setPosition(position);
@@ -89,6 +86,10 @@ var VertexGeometry = function () {
 	this.dispose = () => {
 		geom.dispose();
 		defaultMaterial.dispose();
+		geom = null;
+		defaultMaterial = null;
+		matrix = null;
+		color = null;
 	}
 
 	this.drawnObject = () => {
@@ -97,10 +98,11 @@ var VertexGeometry = function () {
 
 	function applyVertexColors(g, c) {
 		g.faces.forEach((f) => {
-			var n = (f instanceof THREE.Face3) ? 3 : 4;
-			for (var j = 0; j < n; j++) {
-				f.vertexColors[j] = c;
-			}
+			f.color = c;
+			// var n = (f instanceof THREE.Face3) ? 3 : 4;
+			// for (var j = 0; j < n; j++) {
+			// 	f.vertexColors[j] = c;
+			// }
 		});
 	}
 
@@ -127,7 +129,7 @@ function getColor(p, voxel = null) {
 		green = incContrast(p.y, voxelsBounds.min.y, voxelsBounds.max.y, 30, 225);
 		blue = incContrast(p.z, voxelsBounds.min.z, voxelsBounds.max.z, 30, 225);
 	} else {
-		var vc = incContrast(v, voxelsBounds.valueMin, voxelsBounds.valueMax, 30, 225);
+		var vc = incContrast(voxel.value, voxelsBounds.valueMin, voxelsBounds.valueMax, 30, 225);
 		red = green = blue = vc;
 	}
 	return {
@@ -139,7 +141,7 @@ function getColor(p, voxel = null) {
 }
 
 function pointToVoxel(x, y, z) {
-	var hbs = boxSize/2;
+	var hbs = boxSize / 2;
 	return {
 		x: Math.floor(x + positionOffset.x + hbs),
 		y: Math.floor(y + positionOffset.y + hbs),
@@ -155,13 +157,21 @@ function clearScene() {
 		if (child instanceof THREE.Mesh) {
 			child.geometry.dispose();
 			child.material.dispose();
+			child.geometry = null;
+			child.material = null;
 		}
 	}
-	needsRerendering = true;
+	renderer.render(scene, camera);
 }
 
 
-var init = function () {
+function clean() {
+	clearScene();
+	voxels.clear();
+}
+
+
+function init() {
 	clearScene();
 	controls = new THREE.OrbitControls(camera, renderer.domElement);
 	controls.addEventListener('change', (e) => { needsRerendering = true; }, false);
@@ -179,7 +189,7 @@ var init = function () {
 	loadScene();
 }
 
-var resize = function () {
+function resize() {
 	camera.aspect = getSurfaceWidth() / getSurfaceHeight();
 	camera.updateProjectionMatrix();
 	renderer.setSize(getSurfaceWidth(), getSurfaceHeight());
@@ -187,11 +197,11 @@ var resize = function () {
 	needsRerendering = true;
 }
 
-var update = function () {
+function update() {
 	controls.update();
 }
 
-var render = function () {
+function render() {
 	if (doRaycast) {
 		raycaster.setFromCamera(mousePos, camera);
 		var intersects = raycaster.intersectObjects(scene.children);
@@ -200,22 +210,14 @@ var render = function () {
 			var fs = index * 12;
 			var faces = mesh.geometry.faces;
 			for (var f = 0; f < 12; f++) {
-				faces[fs + f].vertexColors.forEach(c => {
-					c.r = color.r / 255;
-					c.g = color.g / 255;
-					c.b = color.b / 255;
-				});
+				var c = faces[fs + f].color;
+				c.r = color.r / 255;
+				c.g = color.g / 255;
+				c.b = color.b / 255;
 			}
 			mesh.geometry.colorsNeedUpdate = true;
 		}
 		if (intersects.length > 0) {
-			// intersects[0].face.vertexColors.forEach(c => {
-			// 		c.r = 1;
-			// 		c.g = 0;
-			// 		c.b = 0;
-			// 	});
-			// 	intersects[0].object.geometry.colorsNeedUpdate = true;
-
 			var p = intersects[0].point;
 			var vp = pointToVoxel(p.x, p.y, p.z);
 			var voxel = voxels.get(vp.x, vp.y, vp.z);
@@ -229,8 +231,9 @@ var render = function () {
 						color: getColor(vp, voxel)
 					};
 					setColor(INTERSECTED["object"], INTERSECTED["index"], { r: 0, g: 255, b: 0 });
+					console.log(vp)
 				}
-			}else{
+			} else {
 				console.log(intersects)
 			}
 		} else {
@@ -285,13 +288,19 @@ function loop() {
 }
 
 function loopSimple() {
-	requestAnimationFrame(loopSimple);
 	render();
 	update();
+	requestAnimationFrame(loopSimple);
 }
 
-init();
-loopSimple();
+window.addEventListener('unload', (event) => {
+	clean();
+	renderer.dispose();
+	renderer.forceContextLoss();
+}, false);
+window.addEventListener('resize', (event) => {
+	resize();
+}, false);
 
 renderSurface.addEventListener('mousemove', (event) => {
 	setMousePosition(event, "move");
@@ -308,7 +317,9 @@ function setMousePosition(event, type) {
 	}
 }
 
-window.addEventListener('resize', resize, false);
+
+init();
+loopSimple();
 
 function calculateBounds() {
 	voxelsBounds.valueMin = voxelsBounds.min.x = voxelsBounds.min.y = voxelsBounds.min.z = Number.POSITIVE_INFINITY;
@@ -361,7 +372,7 @@ function loadScene() {
 	scene.add(vGeometry.drawnObject());
 	vGeometry.dispose();
 
-	controls.userPanSpeed = voxelsBounds.valueMax * 0.004
+	controls.userPanSpeed = 0.004 * new THREE.Vector3().subVectors(voxelsBounds.max, voxelsBounds.min).length()
 
 	needsRerendering = true;
 }
@@ -370,9 +381,42 @@ function incContrast(v, minV, maxV, min, max) {
 	return Math.floor((minV == maxV ? 1 : ((v - minV) / (maxV - minV))) * (max - min) + min);
 }
 
-function clean() {
-	clearScene();
-	voxels.clear();
+function gauss3DSeparated(voxels, size) {
+	function getValue(voxels, x, y, z) {
+		var v = voxels.get(x, y, z);
+		if (!v || !v.value) return 0;
+		return v.value;
+	}
+
+	var kernel = [1 / 4, 2 / 4, 1 / 4];
+	var kh = Math.floor(kernel.length / 2);
+	function gauss1D(voxels, out, axis) {
+		var b = axis == "x" ? { x: 1, y: 0, z: 0 } : (axis == "y" ? { x: 0, y: 1, z: 0 } : { x: 0, y: 0, z: 1 })
+		for (var x = 0; x < size; x++) {
+			for (var y = 0; y < size; y++) {
+				for (var z = 0; z < size; z++) {
+					var sum = 0;
+					kernel.forEach((v, k) => {
+						sum += getValue(voxels, x + (k-kh) * b.x, y + (k-kh) * b.y, z + (k-kh) * b.z) * v;
+					});
+					if (sum > 0) {
+						var v = out.get(x, y, z);
+						if (!v) {
+							v = { value: 0 };
+							out.set(x, y, z, v);
+						}
+						v.value = sum;
+					}
+				}
+			}
+		}
+	}
+	var nvoxels = new VoxelMap();
+	var nvoxels2 = new VoxelMap();
+	gauss1D(voxels, nvoxels, "x");
+	gauss1D(nvoxels, nvoxels2, "y"); nvoxels.clear();
+	gauss1D(nvoxels2, nvoxels, "z");
+	return nvoxels;
 }
 
 function gauss3D(voxels, size) {
@@ -395,7 +439,14 @@ function gauss3D(voxels, size) {
 						});
 					});
 				});
-				if (sum > 0) nvoxels.set(x, y, z, sum);
+				if (sum > 0) {
+					var v = nvoxels.get(x, y, z);
+					if (!v) {
+						v = { value: 0 };
+						nvoxels.set(x, y, z, v);
+					}
+					v.value = sum;
+				}
 			}
 		}
 	}
@@ -418,7 +469,7 @@ function toTensor(kernel1D) {
 	return out;
 }
 
-var toVoxels = function (file, rSize, gauss) {
+function toVoxels(file, rSize, gauss) {
 	clean();
 	console.log("read start")
 	rasterSize = rSize;
@@ -459,10 +510,11 @@ var toVoxels = function (file, rSize, gauss) {
 				console.log(nvoxels.size());
 				if (gauss) {
 					console.log('gaussfilter start');
-					var fvoxels = gauss3D(nvoxels, rasterSize);
+					var fvoxels = gauss3DSeparated(nvoxels, rasterSize);
+					console.log(fvoxels.size())
 					nvoxels.clear();
 					for (var e of fvoxels.entries()) {
-						var v = e[1];
+						var v = e[1].value;
 						var p = fvoxels.getPosition(e[0]);
 						if (v > 0.001) nvoxels.set(p.x, p.y, p.z, { value: v });
 					}

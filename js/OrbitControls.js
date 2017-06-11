@@ -144,7 +144,7 @@ THREE.OrbitControls = function (object, domElement) {
 
 		distance.transformDirection(this.object.matrix);
 		distance.multiplyScalar(scope.userPanSpeed /** radius*/);
-
+		if(Number.isNaN(distance.x)||Number.isNaN(distance.y)||Number.isNaN(distance.z))return;
 		this.object.position.add(distance);
 		this.center.add(distance);
 
