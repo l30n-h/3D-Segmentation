@@ -144,11 +144,17 @@ THREE.OrbitControls = function (object, domElement) {
 
 		distance.transformDirection(this.object.matrix);
 		distance.multiplyScalar(scope.userPanSpeed /** radius*/);
-		if(Number.isNaN(distance.x)||Number.isNaN(distance.y)||Number.isNaN(distance.z))return;
+		if (Number.isNaN(distance.x) || Number.isNaN(distance.y) || Number.isNaN(distance.z)) return;
 		this.object.position.add(distance);
 		this.center.add(distance);
 
 	};
+
+	this.setPosition = function (position) {
+		var distance = new THREE.Vector3().subVectors(position, this.center)
+		this.object.position.add(distance);
+		this.center.add(distance);
+	}
 
 	this.update = function () {
 
