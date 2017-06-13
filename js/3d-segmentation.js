@@ -82,13 +82,15 @@ function VertexGeometry() {
 		matrix.setPosition(position);
 		applyVertexColors(geom, color.setHex(hexColor));
 
-		var p = {x:Math.floor(position.x/10),y:Math.floor(position.y/10),z:Math.floor(position.z/10)}
+		var p = getVBOPosition(position);
 		var vbo = vboMap.get(p.x, p.y, p.z);
-		if(!vbo){
+		if (!vbo) {
 			vbo = new THREE.Geometry();
 			vboMap.set(p.x, p.y, p.z, vbo);
 		}
+		var faceIndex = vbo.faces.length;
 		vbo.merge(geom, matrix);
+		return { vbo: vbo, faceIndex };
 	}
 
 	this.dispose = () => {
@@ -103,17 +105,15 @@ function VertexGeometry() {
 	}
 
 	this.drawnObject = () => {
-		return Array.from(vboMap.entries()).map((e)=>new THREE.Mesh(e[1], defaultMaterial));
+		return Array.from(vboMap.entries()).map((e) => new THREE.Mesh(e[1], defaultMaterial));
+	}
+
+	function getVBOPosition(p) {
+		return { x: Math.floor(p.x / 10), y: Math.floor(p.y / 10), z: Math.floor(p.z / 10) }
 	}
 
 	function applyVertexColors(g, c) {
-		g.faces.forEach((f) => {
-			f.color = c;
-			// var n = (f instanceof THREE.Face3) ? 3 : 4;
-			// for (var j = 0; j < n; j++) {
-			// 	f.vertexColors[j] = c;
-			// }
-		});
+		g.faces.forEach((f) => f.color = c);
 	}
 
 }
@@ -133,8 +133,8 @@ function getColor(p, voxel = null) {
 	if (!voxel) voxel = voxels.get(x, y, z);
 	var colorXYZ = colorType != "sum";
 	var red = 0, green = 0, blue = 0;
-	if (voxel.marked) blue = 255;
-	else if (colorXYZ) {
+	
+	if (colorXYZ) {
 		red = incContrast(p.x, voxelsBounds.min.x, voxelsBounds.max.x, 30, 225);
 		green = incContrast(p.y, voxelsBounds.min.y, voxelsBounds.max.y, 30, 225);
 		blue = incContrast(p.z, voxelsBounds.min.z, voxelsBounds.max.z, 30, 225);
@@ -142,6 +142,11 @@ function getColor(p, voxel = null) {
 		var vc = incContrast(voxel.value, voxelsBounds.valueMin, voxelsBounds.valueMax, 30, 225);
 		red = green = blue = vc;
 	}
+	if (voxel.marked){
+		red*=0.66;
+		green*=0.66;
+		blue*=0.66;
+	} 
 	return {
 		r: red,
 		g: green,
@@ -150,12 +155,36 @@ function getColor(p, voxel = null) {
 	}
 }
 
-function pointToVoxel(x, y, z) {
+function setColor(cube, color) {
+	var fs = cube.faceIndex;
+	var faces = cube.vbo.faces;
+	for (var f = 0; f < 12; f++) {
+		var c = faces[fs + f].color;
+		c.r = color.r / 255;
+		c.g = color.g / 255;
+		c.b = color.b / 255;
+	}
+	cube.vbo.colorsNeedUpdate = true;
+}
+
+function raycastClicked(position) {
+	setTimeout(() => {
+		var vp = pointToVoxel(position);
+		var marked = floodFill(voxels, vp.x, vp.y, vp.z);
+		for (var key of marked.keys()) {
+			var p = marked.getPosition(key);
+			voxels.get(p.x, p.y, p.z)["marked"] = true;
+		}
+		updateColors();
+	}, 0);
+}
+
+function pointToVoxel(p) {
 	var hbs = boxSize / 2;
 	return {
-		x: Math.floor(x + positionOffset.x + hbs),
-		y: Math.floor(y + positionOffset.y + hbs),
-		z: Math.floor(z + positionOffset.z + hbs)
+		x: Math.floor(p.x + hbs),
+		y: Math.floor(p.y + hbs),
+		z: Math.floor(p.z + hbs)
 	};
 }
 
@@ -216,51 +245,28 @@ function render() {
 		raycaster.setFromCamera(mousePos, camera);
 		var intersects = raycaster.intersectObjects(scene.children);
 
-		function setColor(mesh, index, color) {
-			var fs = index;
-			var faces = mesh.geometry.faces;
-			for (var f = 0; f < 12; f++) {
-				var c = faces[fs + f].color;
-				c.r = color.r / 255;
-				c.g = color.g / 255;
-				c.b = color.b / 255;
-			}
-			mesh.geometry.colorsNeedUpdate = true;
-		}
 		if (intersects.length > 0) {
-			var p = intersects[0].point;
-			var vp = pointToVoxel(p.x, p.y, p.z);
+			var vp = pointToVoxel(intersects[0].point);
 			var voxel = voxels.get(vp.x, vp.y, vp.z);
 			if (voxel) {
-				var index = Math.floor(intersects[0].faceIndex/12)*12;
-				if (!INTERSECTED || (INTERSECTED["object"] != intersects[0].object || INTERSECTED["index"] != voxel.index)) {
-					if (INTERSECTED) setColor(INTERSECTED["object"], INTERSECTED["index"], INTERSECTED["color"]);
+				if (!INTERSECTED || INTERSECTED["object"] != voxel.cube) {
+					if (INTERSECTED) setColor(INTERSECTED["object"], INTERSECTED["color"]);
 					INTERSECTED = {
-						object: intersects[0].object,
-						index: index,
+						object: voxel.cube,
 						color: getColor(vp, voxel)
 					};
-					setColor(INTERSECTED["object"], INTERSECTED["index"], { r: 0, g: 255, b: 0 });
+					setColor(voxel.cube, { r: 0, g: 255, b: 0 })
 				}
 			} else {
 				console.log(intersects)
 			}
 		} else {
-			if (INTERSECTED) setColor(INTERSECTED["object"], INTERSECTED["index"], INTERSECTED["color"]);
+			if (INTERSECTED) setColor(INTERSECTED["object"], INTERSECTED["color"]);
 			INTERSECTED = null;
 		}
 		if (doRaycast == "click") {
 			if (intersects.length > 0) {
-				setTimeout(() => {
-					var p = intersects[0].point;
-					var vp = pointToVoxel(p.x, p.y, p.z);
-					var marked = floodFill(voxels, vp.x, vp.y, vp.z);
-					for (var key of marked.keys()) {
-						var p = marked.getPosition(key);
-						voxels.get(p.x, p.y, p.z)["marked"] = true;
-					}
-					loadScene();
-				}, 0);
+				raycastClicked(intersects[0].point);
 			}
 		}
 		doRaycast = false;
@@ -356,6 +362,9 @@ function calculateBounds() {
 	positionOffset.x = (voxelsBounds.max.x - voxelsBounds.min.x) / 2 + voxelsBounds.min.x;
 	positionOffset.y = (voxelsBounds.max.y - voxelsBounds.min.y) / 2 + voxelsBounds.min.y;
 	positionOffset.z = (voxelsBounds.max.z - voxelsBounds.min.z) / 2 + voxelsBounds.min.z;
+
+	controls.userPanSpeed = 0.004 * new THREE.Vector3().subVectors(voxelsBounds.max, voxelsBounds.min).length()
+	controls.setPosition(positionOffset);
 }
 
 function loadScene() {
@@ -373,18 +382,30 @@ function loadScene() {
 			var p = voxels.getPosition(key);
 			var color = getColor(p, value);
 
-			position.set(p.x - positionOffset.x, p.y - positionOffset.y, p.z - positionOffset.z);
-			vGeometry.addCube(position, color.hex);
-		
+			position.set(p.x, p.y, p.z);
+			var cube = vGeometry.addCube(position, color.hex);
 			value["index"] = i;
+			value["cube"] = cube;
 			i++;
 		}
 	}
-	vGeometry.drawnObject().forEach(o=>scene.add(o));
+	vGeometry.drawnObject().forEach(o => scene.add(o));
 	vGeometry.dispose();
 
-	controls.userPanSpeed = 0.004 * new THREE.Vector3().subVectors(voxelsBounds.max, voxelsBounds.min).length()
+	needsRerendering = true;
+}
 
+function updateColors(){
+	for (var e of voxels.entries()) {
+		var key = e[0];
+		var voxel = e[1];
+		var v = e[1].value;
+		//if (v > 0) {
+			var p = voxels.getPosition(key);
+			var color = getColor(p, voxel);
+			setColor(voxel.cube, color);
+		//}
+	}
 	needsRerendering = true;
 }
 
@@ -393,7 +414,7 @@ function incContrast(v, minV, maxV, min, max) {
 }
 
 function gauss3DSeparated(voxels, size) {
-	var getValue = function(x, y, z) {
+	var getValue = function (x, y, z) {
 		var v = voxels.get(x, y, z);
 		if (!v || !v.value) return 0;
 		return v.value;
@@ -403,7 +424,7 @@ function gauss3DSeparated(voxels, size) {
 	return korrelation3D(size, kernel, getValue);
 }
 
-function korrelation3D(size, kernel, getValue){
+function korrelation3D(size, kernel, getValue) {
 	var kh = Math.floor(kernel.length / 2);
 	function gauss1D(out, axis, getValue) {
 		var b = axis == "x" ? { x: 1, y: 0, z: 0 } : (axis == "y" ? { x: 0, y: 1, z: 0 } : { x: 0, y: 0, z: 1 })
@@ -412,7 +433,7 @@ function korrelation3D(size, kernel, getValue){
 				for (var z = 0; z < size; z++) {
 					var sum = 0;
 					kernel.forEach((v, k) => {
-						sum += getValue(x + (k-kh) * b.x, y + (k-kh) * b.y, z + (k-kh) * b.z) * v;
+						sum += getValue(x + (k - kh) * b.x, y + (k - kh) * b.y, z + (k - kh) * b.z) * v;
 					});
 					if (sum > 0) {
 						var v = out.get(x, y, z);
@@ -434,8 +455,8 @@ function korrelation3D(size, kernel, getValue){
 		return v.value;
 	}
 	gauss1D(nvoxels, "x", getValue);
-	gauss1D(nvoxels2, "y", (x,y,z)=>_getValue(nvoxels,x,y,z)); nvoxels.clear();
-	gauss1D(nvoxels, "z", (x,y,z)=>_getValue(nvoxels2,x,y,z));
+	gauss1D(nvoxels2, "y", (x, y, z) => _getValue(nvoxels, x, y, z)); nvoxels.clear();
+	gauss1D(nvoxels, "z", (x, y, z) => _getValue(nvoxels2, x, y, z));
 	return nvoxels;
 }
 
@@ -560,7 +581,7 @@ document.getElementById('start').onclick = function () {
 document.getElementsByName('colorType').forEach((e) => {
 	e.onclick = function () {
 		colorType = e.value;
-		loadScene();
+		updateColors();
 	}
 })
 
