@@ -70,6 +70,7 @@ function VoxelMap() {
 }
 
 function VertexGeometry() {
+	var vboMap = new VoxelMap();
 
 	var geometry = new THREE.Geometry();
 	var geom = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
@@ -80,7 +81,14 @@ function VertexGeometry() {
 	this.addCube = (position, hexColor) => {
 		matrix.setPosition(position);
 		applyVertexColors(geom, color.setHex(hexColor));
-		geometry.merge(geom, matrix);
+
+		var p = {x:Math.floor(position.x/10),y:Math.floor(position.y/10),z:Math.floor(position.z/10)}
+		var vbo = vboMap.get(p.x, p.y, p.z);
+		if(!vbo){
+			vbo = new THREE.Geometry();
+			vboMap.set(p.x, p.y, p.z, vbo);
+		}
+		vbo.merge(geom, matrix);
 	}
 
 	this.dispose = () => {
@@ -90,10 +98,12 @@ function VertexGeometry() {
 		defaultMaterial = null;
 		matrix = null;
 		color = null;
+		vboMap.clear();
+		vboMap = null;
 	}
 
 	this.drawnObject = () => {
-		return new THREE.Mesh(geometry, defaultMaterial);
+		return Array.from(vboMap.entries()).map((e)=>new THREE.Mesh(e[1], defaultMaterial));
 	}
 
 	function applyVertexColors(g, c) {
@@ -207,7 +217,7 @@ function render() {
 		var intersects = raycaster.intersectObjects(scene.children);
 
 		function setColor(mesh, index, color) {
-			var fs = index * 12;
+			var fs = index;
 			var faces = mesh.geometry.faces;
 			for (var f = 0; f < 12; f++) {
 				var c = faces[fs + f].color;
@@ -222,7 +232,7 @@ function render() {
 			var vp = pointToVoxel(p.x, p.y, p.z);
 			var voxel = voxels.get(vp.x, vp.y, vp.z);
 			if (voxel) {
-				var index = voxel.index;
+				var index = Math.floor(intersects[0].faceIndex/12)*12;
 				if (!INTERSECTED || (INTERSECTED["object"] != intersects[0].object || INTERSECTED["index"] != voxel.index)) {
 					if (INTERSECTED) setColor(INTERSECTED["object"], INTERSECTED["index"], INTERSECTED["color"]);
 					INTERSECTED = {
@@ -231,7 +241,6 @@ function render() {
 						color: getColor(vp, voxel)
 					};
 					setColor(INTERSECTED["object"], INTERSECTED["index"], { r: 0, g: 255, b: 0 });
-					console.log(vp)
 				}
 			} else {
 				console.log(intersects)
@@ -261,6 +270,7 @@ function render() {
 	if (needsRerendering) {
 		renderer.render(scene, camera);
 		needsRerendering = false;
+		//console.log(renderer.info);
 	}
 };
 
@@ -351,6 +361,7 @@ function calculateBounds() {
 function loadScene() {
 	clearScene();
 	calculateBounds();
+
 	var vGeometry = new VertexGeometry();
 	var position = new THREE.Vector3();
 	var i = 0;
@@ -364,12 +375,12 @@ function loadScene() {
 
 			position.set(p.x - positionOffset.x, p.y - positionOffset.y, p.z - positionOffset.z);
 			vGeometry.addCube(position, color.hex);
-
+		
 			value["index"] = i;
 			i++;
 		}
 	}
-	scene.add(vGeometry.drawnObject());
+	vGeometry.drawnObject().forEach(o=>scene.add(o));
 	vGeometry.dispose();
 
 	controls.userPanSpeed = 0.004 * new THREE.Vector3().subVectors(voxelsBounds.max, voxelsBounds.min).length()
@@ -382,22 +393,26 @@ function incContrast(v, minV, maxV, min, max) {
 }
 
 function gauss3DSeparated(voxels, size) {
-	function getValue(voxels, x, y, z) {
+	var getValue = function(x, y, z) {
 		var v = voxels.get(x, y, z);
 		if (!v || !v.value) return 0;
 		return v.value;
 	}
 
 	var kernel = [1 / 4, 2 / 4, 1 / 4];
+	return korrelation3D(size, kernel, getValue);
+}
+
+function korrelation3D(size, kernel, getValue){
 	var kh = Math.floor(kernel.length / 2);
-	function gauss1D(voxels, out, axis) {
+	function gauss1D(out, axis, getValue) {
 		var b = axis == "x" ? { x: 1, y: 0, z: 0 } : (axis == "y" ? { x: 0, y: 1, z: 0 } : { x: 0, y: 0, z: 1 })
 		for (var x = 0; x < size; x++) {
 			for (var y = 0; y < size; y++) {
 				for (var z = 0; z < size; z++) {
 					var sum = 0;
 					kernel.forEach((v, k) => {
-						sum += getValue(voxels, x + (k-kh) * b.x, y + (k-kh) * b.y, z + (k-kh) * b.z) * v;
+						sum += getValue(x + (k-kh) * b.x, y + (k-kh) * b.y, z + (k-kh) * b.z) * v;
 					});
 					if (sum > 0) {
 						var v = out.get(x, y, z);
@@ -413,9 +428,14 @@ function gauss3DSeparated(voxels, size) {
 	}
 	var nvoxels = new VoxelMap();
 	var nvoxels2 = new VoxelMap();
-	gauss1D(voxels, nvoxels, "x");
-	gauss1D(nvoxels, nvoxels2, "y"); nvoxels.clear();
-	gauss1D(nvoxels2, nvoxels, "z");
+	function _getValue(voxels, x, y, z) {
+		var v = voxels.get(x, y, z);
+		if (!v || !v.value) return 0;
+		return v.value;
+	}
+	gauss1D(nvoxels, "x", getValue);
+	gauss1D(nvoxels2, "y", (x,y,z)=>_getValue(nvoxels,x,y,z)); nvoxels.clear();
+	gauss1D(nvoxels, "z", (x,y,z)=>_getValue(nvoxels2,x,y,z));
 	return nvoxels;
 }
 
