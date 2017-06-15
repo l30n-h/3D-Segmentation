@@ -20,15 +20,21 @@
 	<div style="display:flex; flex-direction:column; height:100vh">
 		<div>
 			Read .obj:<input type="file" id="infile"> Gridsize:
-			<input type="number" id="raster" value="100"> Gauss:
-			<input type="checkbox" id="gauss">
+			<input type="number" id="raster" value="100"> Filter: <select id="filter">
+					<option value="" selected>-</option>
+					<option value="gauss">Gauss</option>
+					<option value="sobel">Sobel</option>
+				</select>
 			<input type="button" id="start" value="Submit"> Save:
 
-			<input type="button" id="save" value="Save">
+			<input type="button" id="save" value="Save"> Color:
 
-			Color:
-			<input type="radio" id="mc" name="colorType" value="xyz" checked><label for="mc">XYZ</label>
-			<input type="radio" id="vi" name="colorType" value="sum"><label for="vi">Sum</label>
+			<select id="colorType">
+					<option value="xyz" selected>Position</option>
+					<option value="value">Value</option>
+					<option value="normal">Normal</option>
+					<option value="binarisation">Binarisation</option>
+				</select>
 		</div>
 
 		<div id="renderSurface" style="flex: 1 1 auto; overflow:hidden;">

@@ -120,33 +120,36 @@ function VertexGeometry() {
 
 var voxels = new VoxelMap();
 var rasterSize;
-var colorType = document.querySelector('input[name = "colorType"]:checked').value;
+var colorType = document.getElementById('colorType').value;
 var positionOffset = { x: 0, y: 0, z: 0 };
 var voxelsBounds = {
-	min: { x: 0, y: 0, z: 0 },
-	max: { x: 0, y: 0, z: 0 },
-	valueMin: 0,
-	valueMax: 0,
+	min: { x: 0, y: 0, z: 0, value: 0, sx: 0, sy: 0, sz: 0 },
+	max: { x: 0, y: 0, z: 0, value: 0, sx: 0, sy: 0, sz: 0 },
 };
 
 function getColor(p, voxel = null) {
 	if (!voxel) voxel = voxels.get(x, y, z);
-	var colorXYZ = colorType != "sum";
 	var red = 0, green = 0, blue = 0;
-	
-	if (colorXYZ) {
+	if (colorType == "xyz") {
 		red = incContrast(p.x, voxelsBounds.min.x, voxelsBounds.max.x, 30, 225);
 		green = incContrast(p.y, voxelsBounds.min.y, voxelsBounds.max.y, 30, 225);
 		blue = incContrast(p.z, voxelsBounds.min.z, voxelsBounds.max.z, 30, 225);
+	} else if (colorType == "value") {
+		var vc = incContrast(voxel.value, voxelsBounds.min.value, voxelsBounds.max.value, 30, 225);
+		red = green = blue = vc;
+	} else if (colorType == "normal") {
+		red = incContrast(voxel["sx"] || 0, voxelsBounds.min.sx, voxelsBounds.max.sx, 30, 225);
+		green = incContrast(voxel["sy"] || 0, voxelsBounds.min.sy, voxelsBounds.max.sy, 30, 225);
+		blue = incContrast(voxel["sz"] || 0, voxelsBounds.min.sz, voxelsBounds.max.sz, 30, 225);
 	} else {
-		var vc = incContrast(voxel.value, voxelsBounds.valueMin, voxelsBounds.valueMax, 30, 225);
+		var vc = Math.round(Math.floor(incContrast(voxel.value, voxelsBounds.min.value, voxelsBounds.max.value, 30, 225) / 19.5) * 19.5);
 		red = green = blue = vc;
 	}
-	if (voxel.marked){
-		red*=0.66;
-		green*=0.66;
-		blue*=0.66;
-	} 
+	if (voxel.marked) {
+		red *= 0.66;
+		green *= 0.66;
+		blue *= 0.66;
+	}
 	return {
 		r: red,
 		g: green,
@@ -338,30 +341,34 @@ init();
 loopSimple();
 
 function calculateBounds() {
-	voxelsBounds.valueMin = voxelsBounds.min.x = voxelsBounds.min.y = voxelsBounds.min.z = Number.POSITIVE_INFINITY;
-	voxelsBounds.valueMax = voxelsBounds.max.x = voxelsBounds.max.y = voxelsBounds.max.z = Number.NEGATIVE_INFINITY;
+	var minKeys = Object.keys(voxelsBounds.min);
+	var maxKeys = Object.keys(voxelsBounds.max);
+	minKeys.forEach(v => voxelsBounds.min[v] = Number.POSITIVE_INFINITY);
+	maxKeys.forEach(v => voxelsBounds.max[v] = Number.NEGATIVE_INFINITY);
 
+	minKeys = minKeys.filter(v => v != "x" && v != "y" && v != "z");
+	maxKeys = maxKeys.filter(v => v != "x" && v != "y" && v != "z");
+	var coords = ["x", "y", "z"];
 	for (var e of voxels.entries()) {
 		var key = e[0];
-		var v = e[1].value;
+		var voxel = e[1];
+		var v = voxel.value;
 		var p = voxels.getPosition(key);
 		if (v > 0.001) {
-			voxelsBounds.min.x = Math.min(voxelsBounds.min.x, p.x);
-			voxelsBounds.min.y = Math.min(voxelsBounds.min.y, p.y);
-			voxelsBounds.min.z = Math.min(voxelsBounds.min.z, p.z);
-			voxelsBounds.max.x = Math.max(voxelsBounds.max.x, p.x);
-			voxelsBounds.max.y = Math.max(voxelsBounds.max.y, p.y);
-			voxelsBounds.max.z = Math.max(voxelsBounds.max.z, p.z);
-			voxelsBounds.valueMin = Math.min(voxelsBounds.valueMin, v);
-			voxelsBounds.valueMax = Math.max(voxelsBounds.valueMax, v);
+			coords.forEach(v => {
+				voxelsBounds.min[v] = Math.min(voxelsBounds.min[v], p[v]);
+				voxelsBounds.max[v] = Math.max(voxelsBounds.max[v], p[v]);
+			});
+			minKeys.forEach(v => voxelsBounds.min[v] = Math.min(voxelsBounds.min[v], voxel[v] || 0));
+			maxKeys.forEach(v => voxelsBounds.max[v] = Math.max(voxelsBounds.max[v], voxel[v] || 0));
 		} else {
 			voxels.remove(key)
 		}
 	}
 	console.log(voxelsBounds);
-	positionOffset.x = (voxelsBounds.max.x - voxelsBounds.min.x) / 2 + voxelsBounds.min.x;
-	positionOffset.y = (voxelsBounds.max.y - voxelsBounds.min.y) / 2 + voxelsBounds.min.y;
-	positionOffset.z = (voxelsBounds.max.z - voxelsBounds.min.z) / 2 + voxelsBounds.min.z;
+	coords.forEach(v => {
+		positionOffset[v] = (voxelsBounds.max[v] - voxelsBounds.min[v]) / 2 + voxelsBounds.min[v];
+	});
 
 	controls.userPanSpeed = 0.004 * new THREE.Vector3().subVectors(voxelsBounds.max, voxelsBounds.min).length()
 	controls.setPosition(positionOffset);
@@ -395,15 +402,15 @@ function loadScene() {
 	needsRerendering = true;
 }
 
-function updateColors(){
+function updateColors() {
 	for (var e of voxels.entries()) {
 		var key = e[0];
 		var voxel = e[1];
 		var v = e[1].value;
 		//if (v > 0) {
-			var p = voxels.getPosition(key);
-			var color = getColor(p, voxel);
-			setColor(voxel.cube, color);
+		var p = voxels.getPosition(key);
+		var color = getColor(p, voxel);
+		setColor(voxel.cube, color);
 		//}
 	}
 	needsRerendering = true;
@@ -413,7 +420,7 @@ function incContrast(v, minV, maxV, min, max) {
 	return Math.floor((minV == maxV ? 1 : ((v - minV) / (maxV - minV))) * (max - min) + min);
 }
 
-function gauss3DSeparated(voxels, size) {
+function gauss3D(voxels, size) {
 	var getValue = function (x, y, z) {
 		var v = voxels.get(x, y, z);
 		if (!v || !v.value) return 0;
@@ -424,29 +431,33 @@ function gauss3DSeparated(voxels, size) {
 	return korrelation3D(size, kernel, getValue);
 }
 
-function korrelation3D(size, kernel, getValue) {
+function korrelation1D(out, kernel, size, getValue, axis) {
+	var getValueByAxis;
+	if (axis == "x") getValueByAxis = (x, y, z, o) => getValue(x + o, y, z);
+	else if (axis == "y") getValueByAxis = (x, y, z, o) => getValue(x, y + o, z);
+	else getValueByAxis = (x, y, z, o) => getValue(x, y, z + o);
 	var kh = Math.floor(kernel.length / 2);
-	function gauss1D(out, axis, getValue) {
-		var b = axis == "x" ? { x: 1, y: 0, z: 0 } : (axis == "y" ? { x: 0, y: 1, z: 0 } : { x: 0, y: 0, z: 1 })
-		for (var x = 0; x < size; x++) {
-			for (var y = 0; y < size; y++) {
-				for (var z = 0; z < size; z++) {
-					var sum = 0;
-					kernel.forEach((v, k) => {
-						sum += getValue(x + (k - kh) * b.x, y + (k - kh) * b.y, z + (k - kh) * b.z) * v;
-					});
-					if (sum > 0) {
-						var v = out.get(x, y, z);
-						if (!v) {
-							v = { value: 0 };
-							out.set(x, y, z, v);
-						}
-						v.value = sum;
+	for (var x = 0; x < size; x++) {
+		for (var y = 0; y < size; y++) {
+			for (var z = 0; z < size; z++) {
+				var sum = 0;
+				kernel.forEach((v, k) => {
+					sum += getValueByAxis(x, y, z, k - kh) * v;
+				});
+				if (sum > 0) {
+					var v = out.get(x, y, z);
+					if (!v) {
+						v = { value: 0 };
+						out.set(x, y, z, v);
 					}
+					v.value = sum;
 				}
 			}
 		}
 	}
+}
+
+function korrelation3D(size, kernel, getValue) {
 	var nvoxels = new VoxelMap();
 	var nvoxels2 = new VoxelMap();
 	function _getValue(voxels, x, y, z) {
@@ -454,13 +465,108 @@ function korrelation3D(size, kernel, getValue) {
 		if (!v || !v.value) return 0;
 		return v.value;
 	}
-	gauss1D(nvoxels, "x", getValue);
-	gauss1D(nvoxels2, "y", (x, y, z) => _getValue(nvoxels, x, y, z)); nvoxels.clear();
-	gauss1D(nvoxels, "z", (x, y, z) => _getValue(nvoxels2, x, y, z));
+	korrelation1D(nvoxels, kernel, size, getValue, "x");
+	korrelation1D(nvoxels2, kernel, size, (x, y, z) => _getValue(nvoxels, x, y, z), "y"); nvoxels.clear();
+	korrelation1D(nvoxels, kernel, size, (x, y, z) => _getValue(nvoxels2, x, y, z), "z");
 	return nvoxels;
 }
 
-function gauss3D(voxels, size) {
+function sobel3D(voxels, size) {
+	var sx = sobel1D(voxels, size, "x");
+	var sy = sobel1D(voxels, size, "y");
+	var sz = sobel1D(voxels, size, "z");
+	var nvoxels = new VoxelMap();
+	function merge(out, s, name) {
+		for (var e of s.entries()) {
+			if (e[1].value > 0) {
+				var p = nvoxels.getPosition(e[0]);
+				var voxel = nvoxels.get(p.x, p.y, p.z);
+				if (!voxel) {
+					voxel = {};
+					nvoxels.set(p.x, p.y, p.z, voxel);
+				}
+				voxel[name] = e[1].value;
+			}
+		}
+	}
+	merge(nvoxels, sx, "sx");
+	merge(nvoxels, sy, "sy");
+	merge(nvoxels, sz, "sz");
+	return nvoxels;
+}
+
+function sobel1D(voxels, size, axis) {
+	var kernelDiff = [1, 0, -1];
+	var kernelBlur = [1, 2, 1];
+
+	var nvoxels = new VoxelMap();
+	var nvoxels2 = new VoxelMap();
+	var getValue = function (voxels, x, y, z) {
+		var v = voxels.get(x, y, z);
+		if (!v || !v.value) return 0;
+		return v.value;
+	}
+	if (axis == "x") {
+		korrelation1D(nvoxels, kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "z");
+		korrelation1D(nvoxels2, kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "y"); nvoxels.clear();
+		korrelation1D(nvoxels, kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "x");
+	} else if (axis == "y") {
+		korrelation1D(nvoxels, kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "x");
+		korrelation1D(nvoxels2, kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "z"); nvoxels.clear();
+		korrelation1D(nvoxels, kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "y");
+	} else {
+		korrelation1D(nvoxels, kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "y");
+		korrelation1D(nvoxels2, kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "x"); nvoxels.clear();
+		korrelation1D(nvoxels, kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "z");
+	}
+	return nvoxels2;
+}
+
+function extendEdge(voxels, size) {
+	for (var e of voxels.entries()) {
+		var p = voxels.getPosition(e[0]);
+		var n200 = voxels.get(p.x - 2, p.y, p.z);
+		var n100 = voxels.get(p.x - 1, p.y, p.z);
+		var p200 = voxels.get(p.x + 2, p.y, p.z);
+		var p100 = voxels.get(p.x + 1, p.y, p.z);
+
+		var n020 = voxels.get(p.x, p.y - 2, p.z);
+		var n010 = voxels.get(p.x, p.y - 1, p.z);
+		var p020 = voxels.get(p.x, p.y + 2, p.z);
+		var p010 = voxels.get(p.x, p.y + 1, p.z);
+
+		var n002 = voxels.get(p.x, p.y, p.z - 2);
+		var n001 = voxels.get(p.x, p.y, p.z - 1);
+		var p002 = voxels.get(p.x, p.y, p.z + 2);
+		var p001 = voxels.get(p.x, p.y, p.z + 1);
+
+		var value = 30;
+
+		if (n200 && !n100) {
+			voxels.set(p.x - 1, p.y, p.z, { value: value });
+		}
+		if (p200 && !p100) {
+			voxels.set(p.x + 1, p.y, p.z, { value: value });
+		}
+
+		if (n020 && !n010) {
+			voxels.set(p.x, p.y - 1, p.z, { value: value });
+		}
+		if (p020 && !p010) {
+			voxels.set(p.x, p.y + 1, p.z, { value: value });
+		}
+
+		if (n002 && !n001) {
+			voxels.set(p.x, p.y, p.z - 1, { value: value });
+		}
+		if (p002 && !p001) {
+			voxels.set(p.x, p.y, p.z + 1, { value: value });
+		}
+	}
+	return voxels;
+}
+
+function gauss3DNotSeparated(voxels, size) {
 	function getValue(voxels, x, y, z) {
 		var v = voxels.get(x, y, z);
 		if (!v || !v.value) return 0;
@@ -510,7 +616,7 @@ function toTensor(kernel1D) {
 	return out;
 }
 
-function toVoxels(file, rSize, gauss) {
+function toVoxels(file, rSize, filter = "") {
 	clean();
 	console.log("read start")
 	rasterSize = rSize;
@@ -541,7 +647,7 @@ function toVoxels(file, rSize, gauss) {
 				}
 				var v = nvoxels.get(a[0], a[1], a[2]);
 				if (v) v.value++;
-				else nvoxels.set(a[0], a[1], a[2], { value: 1 });
+				else nvoxels.set(a[0], a[1], a[2], { value: 10 });
 			}
 		}, function onComplete() {
 			console.log('read done');
@@ -549,9 +655,9 @@ function toVoxels(file, rSize, gauss) {
 				//nvoxels = toLog(toAmplitude(FFT3d(nvoxels, rasterSize,rasterSize,rasterSize)));
 				//nvoxels = toAmplitude(FFT3d(FFT3d(nvoxels, rasterSize,rasterSize,rasterSize),rasterSize,rasterSize,rasterSize, true));
 				console.log(nvoxels.size());
-				if (gauss) {
-					console.log('gaussfilter start');
-					var fvoxels = gauss3DSeparated(nvoxels, rasterSize);
+				if (filter == "gauss") {
+					console.log('gauss start');
+					var fvoxels = gauss3D(nvoxels, rasterSize);
 					console.log(fvoxels.size())
 					nvoxels.clear();
 					for (var e of fvoxels.entries()) {
@@ -559,7 +665,24 @@ function toVoxels(file, rSize, gauss) {
 						var p = fvoxels.getPosition(e[0]);
 						if (v > 0.001) nvoxels.set(p.x, p.y, p.z, { value: v });
 					}
-					console.log('gaussfilter done');
+					console.log('gauss done');
+				} else if (filter == "sobel") {
+					console.log('sobel start');
+					var fvoxels = sobel3D(nvoxels, rasterSize);
+					console.log(fvoxels.size())
+					nvoxels.clear();
+					for (var e of fvoxels.entries()) {
+						var voxel = e[1];
+						var p = fvoxels.getPosition(e[0]);
+						var sx = voxel.sx || 0;
+						var sy = voxel.sy || 0;
+						var sz = voxel.sz || 0;
+						var grad = Math.sqrt(sx * sx + sy * sy + sz * sz);
+						if (grad > 0.001) nvoxels.set(p.x, p.y, p.z, { value: grad, sx: sx, sy: sy, sz: sz });
+					}
+					console.log('sobel done');
+				} else {
+					//nvoxels = extendEdge(nvoxels, rasterSize);
 				}
 				voxels = nvoxels;
 				loadScene();
@@ -575,15 +698,13 @@ document.getElementById('start').onclick = function () {
 		console.log('No file selected.');
 		return;
 	}
-	toVoxels(file, document.getElementById('raster').value, document.getElementById('gauss').checked);
+	toVoxels(file, document.getElementById('raster').value, document.getElementById('filter').value);
 };
 
-document.getElementsByName('colorType').forEach((e) => {
-	e.onclick = function () {
-		colorType = e.value;
-		updateColors();
-	}
-})
+document.getElementById('colorType').onchange = function (evt) {
+	colorType = evt.target.value;
+	updateColors();
+};
 
 document.getElementById('save').onclick = function () {
 	var text = "";
