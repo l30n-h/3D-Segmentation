@@ -385,7 +385,7 @@ function loadScene() {
 		var key = e[0];
 		var value = e[1];
 		var v = e[1].value;
-		if (v > 0) {
+		//if (v > 0) {
 			var p = voxels.getPosition(key);
 			var color = getColor(p, value);
 
@@ -394,7 +394,7 @@ function loadScene() {
 			value["index"] = i;
 			value["cube"] = cube;
 			i++;
-		}
+		//}
 	}
 	vGeometry.drawnObject().forEach(o => scene.add(o));
 	vGeometry.dispose();
@@ -520,6 +520,53 @@ function sobel1D(voxels, size, axis) {
 		korrelation1D(nvoxels, kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "z");
 	}
 	return nvoxels2;
+}
+
+function normalizeGradients(voxels) {
+	var nvoxels = new VoxelMap();
+	var v = new THREE.Vector3();
+	for (var e of voxels.entries()) {
+		var voxel = e[1];
+		var p = voxels.getPosition(e[0]);
+		v.set(voxel.sx || 0, voxel.sy || 0, voxel.sz || 0)
+		var length = v.length();
+		if (length >= 0.001) {
+			v.normalize();
+			nvoxels.set(p.x, p.y, p.z, { value: length, sx: v.x, sy: v.y, sz: v.z })
+		}
+	}
+	return nvoxels;
+}
+
+function avgGradients(voxels) {
+	var nvoxels = new VoxelMap();
+	var avg = new THREE.Vector3();
+	var v = new THREE.Vector3();
+	for (var e of voxels.entries()) {
+		var voxel = e[1];
+		var p = voxels.getPosition(e[0]);
+		var value = voxel.value;
+		avg.set(voxel.sx || 0, voxel.sy || 0, voxel.sz || 0)
+		var c = 1;
+		for (var x = -1; x < 1; x++) {
+			for (var y = -1; y < 1; y++) {
+				for (var z = -1; z < 1; z++) {
+					if (x != 0 && y != 0 && z != 0) {
+						var nv = voxels.get(p.x + x, p.y + y, p.z + z);
+						if (nv) {
+							v.set(nv.sx || 0, nv.sy || 0, nv.sz || 0).normalize();
+							avg.add(v);
+							value+=nv.value;
+							c++;
+						}
+					}
+				}
+			}
+		}
+		avg.divideScalar(c);
+		nvoxels.set(p.x, p.y, p.z, { value: value/c, sx: avg.x, sy: avg.y, sz: avg.z })
+	}
+	return nvoxels;
 }
 
 function extendEdge(voxels, size) {
@@ -668,18 +715,10 @@ function toVoxels(file, rSize, filter = "") {
 					console.log('gauss done');
 				} else if (filter == "sobel") {
 					console.log('sobel start');
-					var fvoxels = sobel3D(nvoxels, rasterSize);
-					console.log(fvoxels.size())
-					nvoxels.clear();
-					for (var e of fvoxels.entries()) {
-						var voxel = e[1];
-						var p = fvoxels.getPosition(e[0]);
-						var sx = voxel.sx || 0;
-						var sy = voxel.sy || 0;
-						var sz = voxel.sz || 0;
-						var grad = Math.sqrt(sx * sx + sy * sy + sz * sz);
-						if (grad > 0.001) nvoxels.set(p.x, p.y, p.z, { value: grad, sx: sx, sy: sy, sz: sz });
-					}
+					nvoxels = sobel3D(nvoxels, rasterSize);
+					nvoxels = normalizeGradients(nvoxels);
+					//nvoxels = avgGradients(nvoxels);
+					console.log(nvoxels.size())
 					console.log('sobel done');
 				} else {
 					//nvoxels = extendEdge(nvoxels, rasterSize);
