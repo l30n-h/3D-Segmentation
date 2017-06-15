@@ -623,7 +623,7 @@ function toVoxels(file, rSize, filter = "") {
 
 	var min = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
 	var max = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
-	var vertexMatcher = /\s*v\s+([\-+]?\d+(?:\.\d+))\s+([\-+]?\d+(?:\.\d+))\s+([\-+]?\d+(?:\.\d+))/;
+	var vertexMatcher = /\s*v\s+([\-+]?\d+(?:\.\d+)?)\s+([\-+]?\d+(?:\.\d+)?)\s+([\-+]?\d+(?:\.\d+)?)/;
 	readSomeLines(file, function (line) {
 		var match = vertexMatcher.exec(line)
 		if (match) {
@@ -635,8 +635,8 @@ function toVoxels(file, rSize, filter = "") {
 		}
 	}, function onComplete() {
 		var dif = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
-		var nvoxels = new VoxelMap();
 		var fac = (rasterSize - 1) / dif;
+		var nvoxels = new VoxelMap();
 		readSomeLines(file, function (line) {
 			var match = vertexMatcher.exec(line)
 			if (match) {
@@ -712,9 +712,7 @@ document.getElementById('save').onclick = function () {
 		var key = e[0];
 		var v = e[1];
 		var p = voxels.getPosition(key);
-		if (v > 0.001) {
-			text += "v " + x + " " + y + " " + z + "\n";
-		}
+		text += "v " + p.x + " " + p.y + " " + p.z + "\n";
 	}
 	download("voxel.obj", text);
 };
