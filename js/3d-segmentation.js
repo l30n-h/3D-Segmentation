@@ -432,7 +432,7 @@ function gauss3D(voxels, size) {
 	return korrelation3D(size, kernel, getValue);
 }
 
-function korrelation1D(out, kernel, size, getValue, axis) {
+function korrelation1D(kernel, size, getValue, axis, out=new VoxelMap()) {
 	var getValueByAxis;
 	if (axis == "x") getValueByAxis = (x, y, z, o) => getValue(x + o, y, z);
 	else if (axis == "y") getValueByAxis = (x, y, z, o) => getValue(x, y + o, z);
@@ -456,6 +456,7 @@ function korrelation1D(out, kernel, size, getValue, axis) {
 			}
 		}
 	}
+	return out;
 }
 
 function korrelation3D(size, kernel, getValue) {
@@ -466,10 +467,9 @@ function korrelation3D(size, kernel, getValue) {
 		if (!v || !v.value) return 0;
 		return v.value;
 	}
-	korrelation1D(nvoxels, kernel, size, getValue, "x");
-	korrelation1D(nvoxels2, kernel, size, (x, y, z) => _getValue(nvoxels, x, y, z), "y"); nvoxels.clear();
-	korrelation1D(nvoxels, kernel, size, (x, y, z) => _getValue(nvoxels2, x, y, z), "z");
-	return nvoxels;
+	var nvoxels = korrelation1D(kernel, size, getValue, "x");
+	var nvoxels2 = korrelation1D(kernel, size, (x, y, z) => _getValue(nvoxels, x, y, z), "y"); nvoxels.clear();
+	return korrelation1D(kernel, size, (x, y, z) => _getValue(nvoxels2, x, y, z), "z", nvoxels);
 }
 
 function sobel3D(voxels, size) {
@@ -477,7 +477,7 @@ function sobel3D(voxels, size) {
 	var sy = sobel1D(voxels, size, "y");
 	var sz = sobel1D(voxels, size, "z");
 	var nvoxels = new VoxelMap();
-	function merge(out, s, name) {
+	function merge(s, name, out) {
 		for (var e of s.entries()) {
 			if (e[1].value != 0) {
 				var p = nvoxels.getPosition(e[0]);
@@ -490,9 +490,9 @@ function sobel3D(voxels, size) {
 			}
 		}
 	}
-	merge(nvoxels, sx, "sx");
-	merge(nvoxels, sy, "sy");
-	merge(nvoxels, sz, "sz");
+	merge(sx, "sx", nvoxels);
+	merge(sy, "sy", nvoxels);
+	merge(sz, "sz", nvoxels);
 	return nvoxels;
 }
 
@@ -508,19 +508,18 @@ function sobel1D(voxels, size, axis) {
 		return v.value;
 	}
 	if (axis == "x") {
-		korrelation1D(nvoxels, kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "z");
-		korrelation1D(nvoxels2, kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "y"); nvoxels.clear();
-		korrelation1D(nvoxels, kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "x");
+		var nvoxels = korrelation1D(kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "z");
+		var nvoxels2 = korrelation1D(kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "y"); nvoxels.clear();
+		return korrelation1D(kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "x", nvoxels);
 	} else if (axis == "y") {
-		korrelation1D(nvoxels, kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "x");
-		korrelation1D(nvoxels2, kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "z"); nvoxels.clear();
-		korrelation1D(nvoxels, kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "y");
+		var nvoxels = korrelation1D(kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "x");
+		var nvoxels2 = korrelation1D(kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "z"); nvoxels.clear();
+		return korrelation1D(kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "y", nvoxels);
 	} else {
-		korrelation1D(nvoxels, kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "y");
-		korrelation1D(nvoxels2, kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "x"); nvoxels.clear();
-		korrelation1D(nvoxels, kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "z");
+		var nvoxels = korrelation1D(kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "y");
+		var nvoxels2 = korrelation1D(kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "x"); nvoxels.clear();
+		return korrelation1D(kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "z", nvoxels);
 	}
-	return nvoxels;
 }
 
 function normalizeGradients(voxels) {
@@ -612,40 +611,6 @@ function extendEdge(voxels, size) {
 		}
 	}
 	return voxels;
-}
-
-function gauss3DNotSeparated(voxels, size) {
-	function getValue(voxels, x, y, z) {
-		var v = voxels.get(x, y, z);
-		if (!v || !v.value) return 0;
-		return v.value;
-	}
-	var nvoxels = new VoxelMap();
-	var kernel = toTensor([1, 2, 1]);
-	var kh = Math.floor(kernel.length / 2);
-	for (var x = 0; x < size; x++) {
-		for (var y = 0; y < size; y++) {
-			for (var z = 0; z < size; z++) {
-				var sum = 0;
-				kernel.forEach((vx, kx) => {
-					vx.forEach((vy, ky) => {
-						vy.forEach((vz, kz) => {
-							sum += getValue(voxels, x - kh + kx, y - kh + ky, z - kh + kz) * vz;
-						});
-					});
-				});
-				if (sum != 0) {
-					var v = nvoxels.get(x, y, z);
-					if (!v) {
-						v = { value: 0 };
-						nvoxels.set(x, y, z, v);
-					}
-					v.value = sum;
-				}
-			}
-		}
-	}
-	return nvoxels;
 }
 
 function toTensor(kernel1D) {
