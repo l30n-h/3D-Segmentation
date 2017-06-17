@@ -26,15 +26,15 @@ function VoxelMap() {
 	var voxel = new Map();
 
 	this.get = (x, y, z) => {
-		return this.getByKey(hash(x, y, z));
+		return this.getByKey(this.getKey(x, y, z));
 	}
 
 	this.set = (x, y, z, v) => {
-		this.setByKey(hash(x, y, z), v);
+		this.setByKey(this.getKey(x, y, z), v);
 	}
 
 	this.remove = (x, y, z) => {
-		this.removeByKey(hash(x, y, z));
+		this.removeByKey(this.getKey(x, y, z));
 	}
 
 	this.getByKey = (k) => {
@@ -75,7 +75,7 @@ function VoxelMap() {
 		}
 	}
 
-	function hash(x, y, z) {
+	this.getKey = (x, y, z) => {
 		return x + "/" + y + "/" + z;
 	}
 }
@@ -427,61 +427,61 @@ function incContrast(v, minV, maxV, min, max) {
 	return Math.floor((minV == maxV ? 1 : ((v - minV) / (maxV - minV))) * (max - min) + min);
 }
 
-function gauss3D(voxels, size) {
-	var getValue = function (x, y, z) {
+function gauss3D(voxels) {
+	return korrelation3D(voxels, [1 / 4, 2 / 4, 1 / 4]);
+}
+
+function korrelation1D(voxels, kernel, axis, out = new VoxelMap()) {
+	var getPositionByAxis;
+	if (axis == "x") getPositionByAxis = (p, o) => ({ x: p.x + o, y: p.y, z: p.z });
+	else if (axis == "y") getPositionByAxis = (p, o) => ({ x: p.x, y: p.y + o, z: p.z });
+	else getPositionByAxis = (p, o) => ({ x: p.x, y: p.y, z: p.z + o });
+	var kh = Math.floor(kernel.length / 2);
+
+	var keys = new Set();
+	for (var key of voxels.keys()) {
+		var vp = voxels.getPosition(key);
+		for (var o = -kh; o < kernel.length - kh; o++) {
+			var op = getPositionByAxis(vp, o);
+			keys.add(voxels.getKey(op.x, op.y, op.z));
+		}
+	}
+
+	var getValue = (voxels, x, y, z) => {
 		var v = voxels.get(x, y, z);
 		if (!v || !v.value) return 0;
 		return v.value;
 	}
 
-	var kernel = [1 / 4, 2 / 4, 1 / 4];
-	return korrelation3D(size, kernel, getValue);
-}
-
-function korrelation1D(kernel, size, getValue, axis, out = new VoxelMap()) {
-	var getValueByAxis;
-	if (axis == "x") getValueByAxis = (x, y, z, o) => getValue(x + o, y, z);
-	else if (axis == "y") getValueByAxis = (x, y, z, o) => getValue(x, y + o, z);
-	else getValueByAxis = (x, y, z, o) => getValue(x, y, z + o);
-	var kh = Math.floor(kernel.length / 2);
-	for (var x = 0; x < size; x++) {
-		for (var y = 0; y < size; y++) {
-			for (var z = 0; z < size; z++) {
-				var sum = 0;
-				kernel.forEach((v, k) => {
-					sum += getValueByAxis(x, y, z, k - kh) * v;
-				});
-				if (sum != 0) {
-					var v = out.get(x, y, z);
-					if (!v) {
-						v = { value: 0 };
-						out.set(x, y, z, v);
-					}
-					v.value = sum;
-				}
+	for (var key of keys.values()) {
+		var vp = voxels.getPosition(key);
+		var sum = 0;
+		kernel.forEach((v, ki) => {
+			var p = getPositionByAxis(vp, ki - kh);
+			sum += getValue(voxels, p.x, p.y, p.z) * v;
+		});
+		if (sum != 0) {
+			var v = out.getByKey(key);
+			if (!v) {
+				v = { value: 0 };
+				out.setByKey(key, v);
 			}
+			v.value = sum;
 		}
 	}
 	return out;
 }
 
-function korrelation3D(size, kernel, getValue) {
-	var nvoxels = new VoxelMap();
-	var nvoxels2 = new VoxelMap();
-	function _getValue(voxels, x, y, z) {
-		var v = voxels.get(x, y, z);
-		if (!v || !v.value) return 0;
-		return v.value;
-	}
-	var nvoxels = korrelation1D(kernel, size, getValue, "x");
-	var nvoxels2 = korrelation1D(kernel, size, (x, y, z) => _getValue(nvoxels, x, y, z), "y"); nvoxels.clear();
-	return korrelation1D(kernel, size, (x, y, z) => _getValue(nvoxels2, x, y, z), "z", nvoxels);
+function korrelation3D(voxels, kernel) {
+	var nvoxels = korrelation1D(voxels, kernel, "x");
+	var nvoxels2 = korrelation1D(nvoxels, kernel, "y"); nvoxels.clear();
+	return korrelation1D(nvoxels2, kernel, "z", nvoxels);
 }
 
-function sobel3D(voxels, size) {
-	var sx = sobel1D(voxels, size, "x");
-	var sy = sobel1D(voxels, size, "y");
-	var sz = sobel1D(voxels, size, "z");
+function sobel3D(voxels) {
+	var sx = sobel1D(voxels, "x");
+	var sy = sobel1D(voxels, "y");
+	var sz = sobel1D(voxels, "z");
 	var nvoxels = new VoxelMap();
 	function merge(s, name, out) {
 		for (var e of s.entries()) {
@@ -502,29 +502,22 @@ function sobel3D(voxels, size) {
 	return nvoxels;
 }
 
-function sobel1D(voxels, size, axis) {
+function sobel1D(voxels, axis) {
 	var kernelDiff = [1, 0, -1];
 	var kernelBlur = [1, 2, 1];
 
-	var nvoxels = new VoxelMap();
-	var nvoxels2 = new VoxelMap();
-	var getValue = function (voxels, x, y, z) {
-		var v = voxels.get(x, y, z);
-		if (!v || !v.value) return 0;
-		return v.value;
-	}
 	if (axis == "x") {
-		var nvoxels = korrelation1D(kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "z");
-		var nvoxels2 = korrelation1D(kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "y"); nvoxels.clear();
-		return korrelation1D(kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "x", nvoxels);
+		var nvoxels = korrelation1D(voxels, kernelBlur, "z");
+		var nvoxels2 = korrelation1D(nvoxels, kernelBlur, "y"); nvoxels.clear();
+		return korrelation1D(nvoxels2, kernelDiff, "x", nvoxels);
 	} else if (axis == "y") {
-		var nvoxels = korrelation1D(kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "x");
-		var nvoxels2 = korrelation1D(kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "z"); nvoxels.clear();
-		return korrelation1D(kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "y", nvoxels);
+		var nvoxels = korrelation1D(voxels, kernelBlur, "x");
+		var nvoxels2 = korrelation1D(nvoxels, kernelBlur, "z"); nvoxels.clear();
+		return korrelation1D(nvoxels2, kernelDiff, "y", nvoxels);
 	} else {
-		var nvoxels = korrelation1D(kernelBlur, size, (x, y, z) => getValue(voxels, x, y, z), "y");
-		var nvoxels2 = korrelation1D(kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "x"); nvoxels.clear();
-		return korrelation1D(kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "z", nvoxels);
+		var nvoxels = korrelation1D(voxels, kernelBlur, "y");
+		var nvoxels2 = korrelation1D(nvoxels, kernelBlur, "x"); nvoxels.clear();
+		return korrelation1D(nvoxels2, kernelDiff, "z", nvoxels);
 	}
 }
 
@@ -677,7 +670,7 @@ function toVoxels(file, rSize, filter = "") {
 				console.log(nvoxels.size());
 				if (filter == "gauss") {
 					console.log('gauss start');
-					var fvoxels = gauss3D(nvoxels, rasterSize);
+					var fvoxels = gauss3D(nvoxels);
 					console.log(fvoxels.size())
 					nvoxels.clear();
 					for (var e of fvoxels.entries()) {
@@ -687,7 +680,7 @@ function toVoxels(file, rSize, filter = "") {
 					console.log('gauss done');
 				} else if (filter == "sobel") {
 					console.log('sobel start');
-					nvoxels = normalizeGradients(sobel3D(nvoxels, rasterSize));
+					nvoxels = normalizeGradients(sobel3D(nvoxels));
 					//nvoxels = avgGradients(nvoxels);
 					console.log(nvoxels.size())
 					console.log('sobel done');
