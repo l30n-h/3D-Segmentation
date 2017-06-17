@@ -81,50 +81,47 @@ function VoxelMap() {
 }
 
 function VertexGeometry() {
+	var cubes = false;
 	var vboMap = new VoxelMap();
 
-	var geometry = new THREE.Geometry();
 	var geom = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
-	var defaultMaterial = new THREE.MeshBasicMaterial({ vertexColors: THREE.FaceColors });
 	var matrix = new THREE.Matrix4();
-	var color = new THREE.Color();
 
-	this.addCube = (position, hexColor) => {
-		matrix.setPosition(position);
-		applyVertexColors(geom, color.setHex(hexColor));
-
+	this.add = (position) => {
 		var p = getVBOPosition(position);
 		var vbo = vboMap.get(p.x, p.y, p.z);
 		if (!vbo) {
 			vbo = new THREE.Geometry();
 			vboMap.set(p.x, p.y, p.z, vbo);
 		}
-		var faceIndex = vbo.faces.length;
-		vbo.merge(geom, matrix);
-		return { vbo: vbo, faceIndex };
+		var vboIndex;
+		if (cubes) {
+			vboIndex = vbo.faces.length;
+			matrix.setPosition(position);
+			vbo.merge(geom, matrix);
+		} else {
+			vboIndex = vbo.vertices.length;
+			vbo.vertices.push(new THREE.Vector3(position.x, position.y, position.z));
+			vbo.colors.push(new THREE.Color(0));
+		}
+		return { vbo: vbo, vboIndex: vboIndex };
 	}
 
 	this.dispose = () => {
 		geom.dispose();
-		defaultMaterial.dispose();
 		geom = null;
-		defaultMaterial = null;
 		matrix = null;
-		color = null;
 		vboMap.clear();
 		vboMap = null;
 	}
 
-	this.drawnObject = () => {
-		return Array.from(vboMap.entries()).map((e) => new THREE.Mesh(e[1], defaultMaterial));
+	this.drawnObjects = () => {
+		if (cubes) return Array.from(vboMap.entries()).map((e) => new THREE.Mesh(e[1], new THREE.MeshBasicMaterial({ vertexColors: THREE.FaceColors })));
+		return Array.from(vboMap.entries()).map((e) => new THREE.Points(e[1], new THREE.PointsMaterial({ vertexColors: THREE.VertexColors, size:10 })));
 	}
 
 	function getVBOPosition(p) {
 		return { x: Math.floor(p.x / 10), y: Math.floor(p.y / 10), z: Math.floor(p.z / 10) }
-	}
-
-	function applyVertexColors(g, c) {
-		g.faces.forEach((f) => f.color = c);
 	}
 
 }
@@ -171,14 +168,13 @@ function getColor(p, voxel = null) {
 }
 
 function setColor(cube, color) {
-	var fs = cube.faceIndex;
-	var faces = cube.vbo.faces;
-	for (var f = 0; f < 12; f++) {
-		var c = faces[fs + f].color;
-		c.r = color.r / 255;
-		c.g = color.g / 255;
-		c.b = color.b / 255;
-	}
+	var r = color.r / 255;
+	var g = color.g / 255;
+	var b = color.b / 255;
+	if (cube.vbo.faces.length > 0) {
+		for (var f = 0; f < 12; f++) cube.vbo.faces[cube.vboIndex + f].color.setRGB(r, g, b);
+	} else cube.vbo.colors[cube.vboIndex].setRGB(r, g, b);
+
 	cube.vbo.colorsNeedUpdate = true;
 }
 
@@ -399,12 +395,12 @@ function loadScene() {
 		var voxel = e[1];
 		var key = e[0];
 		var p = voxels.getPosition(key);
-		var cube = vGeometry.addCube(p, 0);
+		var cube = vGeometry.add(p);
 		voxel["index"] = i;
 		voxel["cube"] = cube;
 		i++;
 	}
-	vGeometry.drawnObject().forEach(o => scene.add(o));
+	vGeometry.drawnObjects().forEach(o => scene.add(o));
 	vGeometry.dispose();
 
 	updateColors();
@@ -548,13 +544,14 @@ function avgGradients(voxels) {
 		var value = voxel.value;
 		avg.set(voxel.sx || 0, voxel.sy || 0, voxel.sz || 0)
 		var c = 1;
+
 		for (var x = -1; x <= 1; x++) {
 			for (var y = -1; y <= 1; y++) {
 				for (var z = -1; z <= 1; z++) {
 					if (x != 0 && y != 0 && z != 0) {
 						var nv = voxels.get(p.x + x, p.y + y, p.z + z);
 						if (nv) {
-							v.set(nv.sx || 0, nv.sy || 0, nv.sz || 0).normalize();
+							v.set(nv.sx || 0, nv.sy || 0, nv.sz || 0);
 							avg.add(v);
 							value += nv.value;
 							c++;
@@ -564,6 +561,7 @@ function avgGradients(voxels) {
 			}
 		}
 		avg.divideScalar(c);
+		avg.normalize();
 		nvoxels.setByKey(key, { value: value / c, sx: avg.x, sy: avg.y, sz: avg.z })
 	}
 	return nvoxels;
