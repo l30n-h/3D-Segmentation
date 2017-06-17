@@ -121,6 +121,7 @@ function VertexGeometry() {
 var voxels = new VoxelMap();
 var rasterSize;
 var colorType = document.getElementById('colorType').value;
+var clickType = document.getElementById('clickType').value;
 var positionOffset = { x: 0, y: 0, z: 0 };
 var voxelsBounds = {
 	min: { x: 0, y: 0, z: 0, value: 0, sx: 0, sy: 0, sz: 0 },
@@ -171,15 +172,19 @@ function setColor(cube, color) {
 }
 
 function raycastClicked(position) {
-	setTimeout(() => {
-		var vp = pointToVoxel(position);
-		var marked = floodFill(voxels, vp.x, vp.y, vp.z);
-		for (var key of marked.keys()) {
-			var p = marked.getPosition(key);
-			voxels.get(p.x, p.y, p.z)["marked"] = true;
-		}
-		updateColors();
-	}, 0);
+	var vp = pointToVoxel(position);
+	if (clickType == "floodfill") {
+		setTimeout(() => {
+			var marked = floodFill(voxels, vp.x, vp.y, vp.z);
+			for (var key of marked.keys()) {
+				var p = marked.getPosition(key);
+				voxels.get(p.x, p.y, p.z)["marked"] = true;
+			}
+			updateColors();
+		}, 0);
+	} else {
+		console.log(voxels.get(vp.x, vp.y, vp.z))
+	}
 }
 
 function pointToVoxel(p) {
@@ -738,6 +743,10 @@ document.getElementById('start').onclick = function () {
 document.getElementById('colorType').onchange = function (evt) {
 	colorType = evt.target.value;
 	updateColors();
+};
+
+document.getElementById('clickType').onchange = function (evt) {
+	clickType = evt.target.value;
 };
 
 document.getElementById('save').onclick = function () {
