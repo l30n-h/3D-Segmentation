@@ -354,7 +354,7 @@ function calculateBounds() {
 		var voxel = e[1];
 		var v = voxel.value;
 		var p = voxels.getPosition(key);
-		if (v > 0.001) {
+		if (Math.abs(v) > 0.001) {
 			coords.forEach(v => {
 				voxelsBounds.min[v] = Math.min(voxelsBounds.min[v], p[v]);
 				voxelsBounds.max[v] = Math.max(voxelsBounds.max[v], p[v]);
@@ -385,16 +385,14 @@ function loadScene() {
 		var key = e[0];
 		var value = e[1];
 		var v = e[1].value;
-		//if (v > 0) {
-			var p = voxels.getPosition(key);
-			var color = getColor(p, value);
+		var p = voxels.getPosition(key);
+		var color = getColor(p, value);
 
-			position.set(p.x, p.y, p.z);
-			var cube = vGeometry.addCube(position, color.hex);
-			value["index"] = i;
-			value["cube"] = cube;
-			i++;
-		//}
+		position.set(p.x, p.y, p.z);
+		var cube = vGeometry.addCube(position, color.hex);
+		value["index"] = i;
+		value["cube"] = cube;
+		i++;
 	}
 	vGeometry.drawnObject().forEach(o => scene.add(o));
 	vGeometry.dispose();
@@ -407,11 +405,9 @@ function updateColors() {
 		var key = e[0];
 		var voxel = e[1];
 		var v = e[1].value;
-		//if (v > 0) {
 		var p = voxels.getPosition(key);
 		var color = getColor(p, voxel);
 		setColor(voxel.cube, color);
-		//}
 	}
 	needsRerendering = true;
 }
@@ -444,7 +440,7 @@ function korrelation1D(out, kernel, size, getValue, axis) {
 				kernel.forEach((v, k) => {
 					sum += getValueByAxis(x, y, z, k - kh) * v;
 				});
-				if (sum > 0) {
+				if (sum != 0) {
 					var v = out.get(x, y, z);
 					if (!v) {
 						v = { value: 0 };
@@ -478,7 +474,7 @@ function sobel3D(voxels, size) {
 	var nvoxels = new VoxelMap();
 	function merge(out, s, name) {
 		for (var e of s.entries()) {
-			if (e[1].value > 0) {
+			if (e[1].value != 0) {
 				var p = nvoxels.getPosition(e[0]);
 				var voxel = nvoxels.get(p.x, p.y, p.z);
 				if (!voxel) {
@@ -519,7 +515,7 @@ function sobel1D(voxels, size, axis) {
 		korrelation1D(nvoxels2, kernelBlur, size, (x, y, z) => getValue(nvoxels, x, y, z), "x"); nvoxels.clear();
 		korrelation1D(nvoxels, kernelDiff, size, (x, y, z) => getValue(nvoxels2, x, y, z), "z");
 	}
-	return nvoxels2;
+	return nvoxels;
 }
 
 function normalizeGradients(voxels) {
@@ -548,15 +544,15 @@ function avgGradients(voxels) {
 		var value = voxel.value;
 		avg.set(voxel.sx || 0, voxel.sy || 0, voxel.sz || 0)
 		var c = 1;
-		for (var x = -1; x < 1; x++) {
-			for (var y = -1; y < 1; y++) {
-				for (var z = -1; z < 1; z++) {
+		for (var x = -1; x <= 1; x++) {
+			for (var y = -1; y <= 1; y++) {
+				for (var z = -1; z <= 1; z++) {
 					if (x != 0 && y != 0 && z != 0) {
 						var nv = voxels.get(p.x + x, p.y + y, p.z + z);
 						if (nv) {
 							v.set(nv.sx || 0, nv.sy || 0, nv.sz || 0).normalize();
 							avg.add(v);
-							value+=nv.value;
+							value += nv.value;
 							c++;
 						}
 					}
@@ -564,7 +560,7 @@ function avgGradients(voxels) {
 			}
 		}
 		avg.divideScalar(c);
-		nvoxels.set(p.x, p.y, p.z, { value: value/c, sx: avg.x, sy: avg.y, sz: avg.z })
+		nvoxels.set(p.x, p.y, p.z, { value: value / c, sx: avg.x, sy: avg.y, sz: avg.z })
 	}
 	return nvoxels;
 }
@@ -633,7 +629,7 @@ function gauss3DNotSeparated(voxels, size) {
 						});
 					});
 				});
-				if (sum > 0) {
+				if (sum != 0) {
 					var v = nvoxels.get(x, y, z);
 					if (!v) {
 						v = { value: 0 };
@@ -710,13 +706,12 @@ function toVoxels(file, rSize, filter = "") {
 					for (var e of fvoxels.entries()) {
 						var v = e[1].value;
 						var p = fvoxels.getPosition(e[0]);
-						if (v > 0.001) nvoxels.set(p.x, p.y, p.z, { value: v });
+						if (Math.abs(v) > 0.001) nvoxels.set(p.x, p.y, p.z, { value: v });
 					}
 					console.log('gauss done');
 				} else if (filter == "sobel") {
 					console.log('sobel start');
-					nvoxels = sobel3D(nvoxels, rasterSize);
-					nvoxels = normalizeGradients(nvoxels);
+					nvoxels = normalizeGradients(sobel3D(nvoxels, rasterSize));
 					//nvoxels = avgGradients(nvoxels);
 					console.log(nvoxels.size())
 					console.log('sobel done');
@@ -972,7 +967,7 @@ function count8NeighbourAt(f, x, y, z) {
 		for (var ny = y - 1; ny <= y + 1; ny++) {
 			for (var nz = z - 1; nz <= z + 1; nz++) {
 				var v = f.get(p.x, p.y, p.z);
-				if (v && v.value > 0) n++;
+				if (v && v.value != 0) n++;
 			}
 		}
 	}
@@ -986,7 +981,7 @@ function floodFill(f, x, y, z) {
 	while (stack.length > 0) {
 		var p = stack.pop();
 		var v = f.get(p.x, p.y, p.z);
-		if (v && v.value > 0 && !marked.get(p.x, p.y, p.z)) {
+		if (v && v.value != 0 && !marked.get(p.x, p.y, p.z)) {
 			marked.set(p.x, p.y, p.z, true);
 			for (var nx = p.x - 1; nx <= p.x + 1; nx++) {
 				for (var ny = p.y - 1; ny <= p.y + 1; ny++) {
