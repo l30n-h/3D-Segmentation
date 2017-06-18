@@ -319,21 +319,20 @@ function render() {
 		var hit_position = []
 		var hit_normal = []
 		var getVoxel = (x, y, z) => {
-			var vp = pointToVoxel({ x, y, z });
-			return voxels.get(vp.x, vp.y, vp.z);
+			return voxels.get(x, y, z);
 		}
 		var hbs = boxSize / 2;
 		var min = { x: voxelsBounds.min.x - hbs, y: voxelsBounds.min.y - hbs, z: voxelsBounds.min.z - hbs };
 		var max = { x: voxelsBounds.max.x + hbs, y: voxelsBounds.max.y + hbs, z: voxelsBounds.max.z + hbs };
-		var hit = traceRay(getVoxel, raycaster.ray.origin, raycaster.ray.direction, min, max, hit_position, hit_normal);
+		var hit = raycast(getVoxel, raycaster.ray.origin, raycaster.ray.direction, min, max);
 		if (hit) {
 			var vp = pointToVoxel(hit.position);
 			var voxel = voxels.get(vp.x, vp.y, vp.z);
 			if (voxel) {
-				if (!INTERSECTED || INTERSECTED["object"] != voxel.cube) {
-					if (INTERSECTED) setColor(INTERSECTED["object"], getColor(INTERSECTED["vp"], INTERSECTED["object"]));
+				if (!INTERSECTED || INTERSECTED["voxel"] != voxel) {
+					if (INTERSECTED) setColor(INTERSECTED["voxel"].cube, getColor(INTERSECTED["vp"], INTERSECTED["voxel"]));
 					INTERSECTED = {
-						object: voxel.cube,
+						voxel:voxel,
 						vp: vp
 					};
 					setColor(voxel.cube, { r: 0, g: 255, b: 0 })
@@ -342,7 +341,7 @@ function render() {
 				console.log(hit)
 			}
 		} else {
-			if (INTERSECTED) setColor(INTERSECTED["object"], getColor(INTERSECTED["vp"], INTERSECTED["object"]));
+			if (INTERSECTED) setColor(INTERSECTED["voxel"].cube, getColor(INTERSECTED["vp"], INTERSECTED["voxel"]));
 			INTERSECTED = null;
 		}
 		if (doRaycast == "click") {
@@ -455,6 +454,9 @@ function calculateBounds() {
 function loadScene() {
 	clearScene();
 	calculateBounds();
+
+	var axisHelper = new THREE.AxisHelper(5);
+	scene.add(axisHelper);
 
 	var vGeometry = new VertexGeometry();
 	var i = 0;
@@ -1104,82 +1106,54 @@ var Octree = function (s) {
 }
 */
 
+function nextVoxel(p, d) {
+	var vp = pointToVoxel(p);
+	var difx = vp.x + Math.sign(d.x) / 2 - p.x;
+	var dify = vp.y + Math.sign(d.y) / 2 - p.y;
+	var difz = vp.z + Math.sign(d.z) / 2 - p.z;
+	var min = Math.min(difx / d.x, dify / d.y, difz / d.z) + 0.5;//TODO fix min=0
+	return { position: { x: p.x + d.x * min, y: p.y + d.y * min, z: p.z + d.z * min }, t: min };
+}
 
-function traceRay_impl(getVoxel, p, d, min, max, hit_pos, hit_norm) {
+function raycast(getVoxel, p, d, min, max) {
 	var r = intersectsRayAABB(p, d, min, max);
 	if (!r) return false;
 
-	var t = r.tmin <= 0 ? 0 : r.tmin;
+	var t = r.tmin < 0 ? 0 : r.tmin;
 
 	var i = { x: p.x + t * d.x, y: p.y + t * d.y, z: p.z + t * d.z };
-	var step = { x: Math.sign(d.x) || -1, y: Math.sign(d.y) || -1, z: Math.sign(d.z) || -1 };
 
-	var txDelta = Math.abs(1 / d.x);
-	var tyDelta = Math.abs(1 / d.y);
-	var tzDelta = Math.abs(1 / d.z);
 
-	var xdist = (step.x > 0) ? (i.x + 1 - p.x) : (p.x - i.x);
-	var ydist = (step.y > 0) ? (i.y + 1 - p.y) : (p.y - i.y);
-	var zdist = (step.z > 0) ? (i.z + 1 - p.z) : (p.z - i.z);
+	// console.log("start")
+	// var rayLine = new THREE.Geometry();
+	// rayLine.vertices.push(new THREE.Vector3(i.x, i.y, i.z))
+	// rayLine.vertices.push(new THREE.Vector3(i.x + d.x * 100, i.y + d.y * 100, i.z + d.z * 100))
+	// scene.add(new THREE.Line(rayLine, new THREE.MeshBasicMaterial({ color: 0xffff00 })))
 
-	var txMax = (txDelta < Infinity) ? txDelta * xdist : Infinity;
-	var tyMax = (tyDelta < Infinity) ? tyDelta * ydist : Infinity;
-	var tzMax = (tzDelta < Infinity) ? tzDelta * zdist : Infinity;
+	// var wb = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
+	// var m = new THREE.Mesh(wb, new THREE.MeshBasicMaterial(0xff0000));
+	// var vp = pointToVoxel(i);
+	// m.position.set(vp.x, vp.y, vp.z)
+	// scene.add(new THREE.BoxHelper(m, 0xff0000));
 
-	var steppedIndex = -1;
-
+	var p = i; 
+	var maxIt = Math.abs(max.x-min.x)+Math.abs(max.y-min.y)+Math.abs(max.z-min.z);
 	while (t <= r.tmax) {
-		var b = getVoxel(i.x, i.y, i.z)
-		if (b) {
-			return {
-				position: { x: p.x + t * d.x, y: p.y + t * d.y, z: p.z + t * d.z },
-				normal: { x: steppedIndex === 0 ? -step.x : 0, y: steppedIndex === 1 ? -step.y : 0, z: steppedIndex === 2 ? -step.z : 0 }
-			};
-		}
-		if (txMax < tyMax) {
-			if (txMax < tzMax) {
-				i.x += step.x
-				t = txMax
-				txMax += txDelta
-				steppedIndex = 0
-			} else {
-				i.z += step.z
-				t = tzMax
-				tzMax += tzDelta
-				steppedIndex = 2
-			}
-		} else {
-			if (tyMax < tzMax) {
-				i.y += step.y
-				t = tyMax
-				tyMax += tyDelta
-				steppedIndex = 1
-			} else {
-				i.z += step.z
-				t = tzMax
-				tzMax += tzDelta
-				steppedIndex = 2
-			}
-		}
+		if (maxIt-- < 0) break;
+		// m = new THREE.Mesh(wb, new THREE.MeshBasicMaterial(0x0000ff));
+		// m.position.set(vp.x, vp.y, vp.z)
+		// scene.add(new THREE.BoxHelper(m, 0x0000ff));
 
+		var vp = pointToVoxel(p);
+		if (getVoxel(vp.x, vp.y, vp.z)) {
+			return { position: vp };
+		}
+		var out = nextVoxel(p, d);
+		p = out.position;
+		t += out.t;
 	}
 	return false;
 
-}
-
-function traceRay(getVoxel, origin, direction, min, max, hit_pos, hit_norm) {
-	var p = { x: origin.x, y: origin.y, z: origin.z };
-	var d = { x: direction.x, y: direction.y, z: direction.z };
-	var ds = Math.sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
-
-	if (ds === 0) {
-		throw new Error("Can't raycast along a zero vector");
-	}
-
-	d.x /= ds;
-	d.y /= ds;
-	d.z /= ds;
-	return traceRay_impl(getVoxel, p, d, min, max, hit_pos, hit_norm);
 }
 
 
@@ -1202,8 +1176,8 @@ function intersectsRayAABB(p, d, min, max) {
 	var tzmax = (max.z - p.z) / d.z;
 	if (tzmin > tzmax) { var tmp = tzmin; tzmin = tzmax; tzmax = tmp; }
 
-	if ((tmin > tzmax) || (tzmin > tmax))
-		return false;
+	if ((tmin > tzmax) || (tzmin > tmax)) return false;
+
 	if (tzmin > tmin)
 		tmin = tzmin;
 	if (tzmax < tmax)
