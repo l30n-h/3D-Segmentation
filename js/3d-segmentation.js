@@ -15,6 +15,7 @@ var mousePos = new THREE.Vector2(), INTERSECTED, doRaycast = false;
 var scene = new THREE.Scene();
 
 renderer.setSize(getSurfaceWidth(), getSurfaceHeight());
+renderer.setPixelRatio(window.devicePixelRatio);
 renderSurface.appendChild(renderer.domElement);
 
 var needsRerendering = true;
@@ -95,6 +96,7 @@ function VertexGeometry() {
 		var vbo = vboMap.get(p.x, p.y, p.z);
 		if (!vbo) {
 			vbo = { vertices: [], colors: [], geo: new THREE.BufferGeometry() };
+			vbo.geo["isCube"] = cubes;
 			vboMap.set(p.x, p.y, p.z, vbo);
 		}
 		var vboIndex = Math.floor(vbo.vertices.length / 3);
@@ -228,11 +230,10 @@ function setColor(cube, color) {
 	var b = color.b / 255;
 	var colors = cube.vbo.getAttribute("color");
 	if (colors) {
-		var o = cube.vboIndex;
-		for (var c = 0; c < 8; c++) colors.setXYZ(c + o, r, g, b);
+		if (cube.vbo.isCube) for (var c = 0; c < 8; c++) colors.setXYZ(cube.vboIndex + c, r, g, b);
+		else colors.setXYZ(cube.vboIndex, r, g, b);
 		colors.needsUpdate = true;
-
-	}// else cube.vbo.colors[cube.vboIndex].setRGB(r, g, b);
+	}
 }
 
 function raycastClicked(position) {
@@ -314,30 +315,39 @@ function update() {
 function render() {
 	if (doRaycast) {
 		raycaster.setFromCamera(mousePos, camera);
-		var intersects = raycaster.intersectObjects(scene.children);
 
-		if (intersects.length > 0) {
-			var vp = pointToVoxel(intersects[0].point);
+		var hit_position = []
+		var hit_normal = []
+		var getVoxel = (x, y, z) => {
+			var vp = pointToVoxel({ x, y, z });
+			return voxels.get(vp.x, vp.y, vp.z);
+		}
+		var hbs = boxSize / 2;
+		var min = { x: voxelsBounds.min.x - hbs, y: voxelsBounds.min.y - hbs, z: voxelsBounds.min.z - hbs };
+		var max = { x: voxelsBounds.max.x + hbs, y: voxelsBounds.max.y + hbs, z: voxelsBounds.max.z + hbs };
+		var hit = traceRay(getVoxel, raycaster.ray.origin, raycaster.ray.direction, min, max, hit_position, hit_normal);
+		if (hit) {
+			var vp = pointToVoxel(hit.position);
 			var voxel = voxels.get(vp.x, vp.y, vp.z);
 			if (voxel) {
 				if (!INTERSECTED || INTERSECTED["object"] != voxel.cube) {
-					if (INTERSECTED) setColor(INTERSECTED["object"], INTERSECTED["color"]);
+					if (INTERSECTED) setColor(INTERSECTED["object"], getColor(INTERSECTED["vp"], INTERSECTED["object"]));
 					INTERSECTED = {
 						object: voxel.cube,
-						color: getColor(vp, voxel)
+						vp: vp
 					};
 					setColor(voxel.cube, { r: 0, g: 255, b: 0 })
 				}
 			} else {
-				console.log(intersects)
+				console.log(hit)
 			}
 		} else {
-			if (INTERSECTED) setColor(INTERSECTED["object"], INTERSECTED["color"]);
+			if (INTERSECTED) setColor(INTERSECTED["object"], getColor(INTERSECTED["vp"], INTERSECTED["object"]));
 			INTERSECTED = null;
 		}
 		if (doRaycast == "click") {
-			if (intersects.length > 0) {
-				raycastClicked(intersects[0].point);
+			if (hit) {
+				raycastClicked(hit.position);
 			}
 		}
 		doRaycast = false;
@@ -477,7 +487,7 @@ function updateColors() {
 }
 
 function incContrast(v, minV, maxV, min, max) {
-	return Math.floor((minV == maxV ? 1 : ((v - minV) / (maxV - minV))) * (max - min) + min);
+	return /*Math.floor*/((minV == maxV ? 1 : ((v - minV) / (maxV - minV))) * (max - min) + min);
 }
 
 function gauss3D(voxels) {
@@ -1093,3 +1103,111 @@ var Octree = function (s) {
 	}
 }
 */
+
+
+function traceRay_impl(getVoxel, p, d, min, max, hit_pos, hit_norm) {
+	var r = intersectsRayAABB(p, d, min, max);
+	if (!r) return false;
+
+	var t = r.tmin <= 0 ? 0 : r.tmin;
+
+	var i = { x: p.x + t * d.x, y: p.y + t * d.y, z: p.z + t * d.z };
+	var step = { x: Math.sign(d.x) || -1, y: Math.sign(d.y) || -1, z: Math.sign(d.z) || -1 };
+
+	var txDelta = Math.abs(1 / d.x);
+	var tyDelta = Math.abs(1 / d.y);
+	var tzDelta = Math.abs(1 / d.z);
+
+	var xdist = (step.x > 0) ? (i.x + 1 - p.x) : (p.x - i.x);
+	var ydist = (step.y > 0) ? (i.y + 1 - p.y) : (p.y - i.y);
+	var zdist = (step.z > 0) ? (i.z + 1 - p.z) : (p.z - i.z);
+
+	var txMax = (txDelta < Infinity) ? txDelta * xdist : Infinity;
+	var tyMax = (tyDelta < Infinity) ? tyDelta * ydist : Infinity;
+	var tzMax = (tzDelta < Infinity) ? tzDelta * zdist : Infinity;
+
+	var steppedIndex = -1;
+
+	while (t <= r.tmax) {
+		var b = getVoxel(i.x, i.y, i.z)
+		if (b) {
+			return {
+				position: { x: p.x + t * d.x, y: p.y + t * d.y, z: p.z + t * d.z },
+				normal: { x: steppedIndex === 0 ? -step.x : 0, y: steppedIndex === 1 ? -step.y : 0, z: steppedIndex === 2 ? -step.z : 0 }
+			};
+		}
+		if (txMax < tyMax) {
+			if (txMax < tzMax) {
+				i.x += step.x
+				t = txMax
+				txMax += txDelta
+				steppedIndex = 0
+			} else {
+				i.z += step.z
+				t = tzMax
+				tzMax += tzDelta
+				steppedIndex = 2
+			}
+		} else {
+			if (tyMax < tzMax) {
+				i.y += step.y
+				t = tyMax
+				tyMax += tyDelta
+				steppedIndex = 1
+			} else {
+				i.z += step.z
+				t = tzMax
+				tzMax += tzDelta
+				steppedIndex = 2
+			}
+		}
+
+	}
+	return false;
+
+}
+
+function traceRay(getVoxel, origin, direction, min, max, hit_pos, hit_norm) {
+	var p = { x: origin.x, y: origin.y, z: origin.z };
+	var d = { x: direction.x, y: direction.y, z: direction.z };
+	var ds = Math.sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+
+	if (ds === 0) {
+		throw new Error("Can't raycast along a zero vector");
+	}
+
+	d.x /= ds;
+	d.y /= ds;
+	d.z /= ds;
+	return traceRay_impl(getVoxel, p, d, min, max, hit_pos, hit_norm);
+}
+
+
+function intersectsRayAABB(p, d, min, max) {
+	var tmin = (min.x - p.x) / d.x;
+	var tmax = (max.x - p.x) / d.x;
+	if (tmin > tmax) { var tmp = tmin; tmin = tmax; tmax = tmp; }
+
+	var tymin = (min.y - p.y) / d.y;
+	var tymax = (max.y - p.y) / d.y;
+	if (tymin > tymax) { var tmp = tymin; tymin = tymax; tymax = tmp; }
+
+	if ((tmin > tymax) || (tymin > tmax)) return false;
+	if (tymin > tmin)
+		tmin = tymin;
+	if (tymax < tmax)
+		tmax = tymax;
+
+	var tzmin = (min.z - p.z) / d.z;
+	var tzmax = (max.z - p.z) / d.z;
+	if (tzmin > tzmax) { var tmp = tzmin; tzmin = tzmax; tzmax = tmp; }
+
+	if ((tmin > tzmax) || (tzmin > tmax))
+		return false;
+	if (tzmin > tmin)
+		tmin = tzmin;
+	if (tzmax < tmax)
+		tmax = tzmax;
+
+	return { tmin, tmax };
+} 
