@@ -81,49 +81,104 @@ function VoxelMap() {
 }
 
 function VertexGeometry() {
-	var cubes = false;
+	var cubes = true;
 	var vboMap = new VoxelMap();
 
-	var geom = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
+	var boxGeo = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
+	boxGeo.faceVertexUvs = [[]]; var v = { x: 0, y: 0, z: 0 }
+	boxGeo.faces.forEach(f => f.vertexNormals = [])
+
 	var matrix = new THREE.Matrix4();
 
 	this.add = (position) => {
 		var p = getVBOPosition(position);
 		var vbo = vboMap.get(p.x, p.y, p.z);
 		if (!vbo) {
-			vbo = new THREE.Geometry();
+			vbo = { vertices: [], colors: [], geo: new THREE.BufferGeometry() };
 			vboMap.set(p.x, p.y, p.z, vbo);
 		}
-		var vboIndex;
-		if (cubes) {
-			vboIndex = vbo.faces.length;
-			matrix.setPosition(position);
-			vbo.merge(geom, matrix);
-		} else {
-			vboIndex = vbo.vertices.length;
-			vbo.vertices.push(new THREE.Vector3(position.x, position.y, position.z));
-			vbo.colors.push(new THREE.Color(0));
-		}
-		return { vbo: vbo, vboIndex: vboIndex };
+		var vboIndex = Math.floor(vbo.vertices.length / 3);
+		if (cubes) vboIndex *= 8;
+		vbo.vertices.push(position.x, position.y, position.z);
+		vbo.colors.push(1, 0, 0);
+		return { vbo: vbo.geo, vboIndex: vboIndex };
 	}
 
 	this.dispose = () => {
-		geom.dispose();
-		geom = null;
+		boxGeo.dispose();
+		boxGeo = null;
 		matrix = null;
 		vboMap.clear();
 		vboMap = null;
 	}
 
 	this.drawnObjects = () => {
-		if (cubes) return Array.from(vboMap.entries()).map((e) => new THREE.Mesh(e[1], new THREE.MeshBasicMaterial({ vertexColors: THREE.FaceColors })));
-		return Array.from(vboMap.entries()).map((e) => new THREE.Points(e[1], new THREE.PointsMaterial({ vertexColors: THREE.VertexColors, size:10 })));
+		if (cubes) return Array.from(vboMap.entries()).map((e) => getCubeMesh(e[1]));
+		return Array.from(vboMap.entries()).map((e) => getPointsMesh(e[1]));
 	}
 
 	function getVBOPosition(p) {
 		return { x: Math.floor(p.x / 10), y: Math.floor(p.y / 10), z: Math.floor(p.z / 10) }
 	}
 
+	function getCubeMesh(vbo) {
+		var b = boxSize / 2;
+		var vertices = new Float32Array(vbo.vertices.length * 8);
+		for (var i = 0; i < vbo.vertices.length; i += 3) {
+			var x = vbo.vertices[i];
+			var y = vbo.vertices[i + 1];
+			var z = vbo.vertices[i + 2];
+			var i8 = i * 8;
+			vertices[i8] = vertices[i8 + 3] = vertices[i8 + 6] = vertices[i8 + 9] = x - b;
+			vertices[i8 + 1] = vertices[i8 + 4] = vertices[i8 + 13] = vertices[i8 + 16] = y - b;
+			vertices[i8 + 2] = vertices[i8 + 8] = vertices[i8 + 14] = vertices[i8 + 20] = z - b;
+			vertices[i8 + 12] = vertices[i8 + 15] = vertices[i8 + 18] = vertices[i8 + 21] = x + b;
+			vertices[i8 + 7] = vertices[i8 + 10] = vertices[i8 + 19] = vertices[i8 + 22] = y + b;
+			vertices[i8 + 5] = vertices[i8 + 11] = vertices[i8 + 17] = vertices[i8 + 23] = z + b;
+		}
+		var colors = new Float32Array(vbo.vertices.length * 8);
+		for (var i = 0; i < Math.min(vbo.colors.length, vbo.vertices.length); i += 3) {
+			var r = vbo.colors[i];
+			var g = vbo.colors[i + 1];
+			var b = vbo.colors[i + 2];
+			var i8 = i * 8;
+			for (var j = 0; j < 24; j += 3) {
+				colors[i8 + j] = r;
+				colors[i8 + j + 1] = g;
+				colors[i8 + j + 2] = b;
+			}
+		}
+
+		var indices = new Uint32Array(Math.floor(vbo.vertices.length / 3) * 16 - 2);
+		for (var i = 0, o = 0; i < indices.length; i += 16, o += 8) {
+			indices[i] = indices[i + 7] = 2 + o;
+			indices[i + 1] = 6 + o;
+			indices[i + 2] = indices[i + 9] = 0 + o;
+			indices[i + 3] = 4 + o;
+			indices[i + 4] = indices[i + 11] = 5 + o;
+			indices[i + 5] = 6 + o;
+			indices[i + 6] = indices[i + 13] = 7 + o;
+			indices[i + 8] = indices[i + 12] = 3 + o;
+			indices[i + 10] = 1 + o;
+			if (i + 14 < indices.length) {
+				indices[i + 14] = indices[i + 13];
+				indices[i + 15] = 10 + o;
+			}
+		}
+
+		vbo.geo.addAttribute('position', new THREE.BufferAttribute(vertices, 3));
+		vbo.geo.addAttribute('color', new THREE.BufferAttribute(colors, 3));
+		vbo.geo.setIndex(new THREE.BufferAttribute(indices, 1));
+		var m = new THREE.Mesh(vbo.geo, new THREE.MeshBasicMaterial({ vertexColors: THREE.VertexColors }));
+		m.drawMode = THREE.TriangleStripDrawMode;
+		return m;
+	}
+
+	function getPointsMesh(vbo) {
+		vbo.geo.addAttribute('position', new THREE.BufferAttribute(new Float32Array(vbo.vertices), 3));
+		vbo.geo.addAttribute('color', new THREE.BufferAttribute(new Float32Array(vbo.colors), 3));
+		return new THREE.Points(vbo.geo, new THREE.PointsMaterial({ vertexColors: THREE.VertexColors, size: 10 }));
+	}
 }
 
 var voxels = new VoxelMap();
@@ -171,11 +226,13 @@ function setColor(cube, color) {
 	var r = color.r / 255;
 	var g = color.g / 255;
 	var b = color.b / 255;
-	if (cube.vbo.faces.length > 0) {
-		for (var f = 0; f < 12; f++) cube.vbo.faces[cube.vboIndex + f].color.setRGB(r, g, b);
-	} else cube.vbo.colors[cube.vboIndex].setRGB(r, g, b);
+	var colors = cube.vbo.getAttribute("color");
+	if (colors) {
+		var o = cube.vboIndex;
+		for (var c = 0; c < 8; c++) colors.setXYZ(c + o, r, g, b);
+		colors.needsUpdate = true;
 
-	cube.vbo.colorsNeedUpdate = true;
+	}// else cube.vbo.colors[cube.vboIndex].setRGB(r, g, b);
 }
 
 function raycastClicked(position) {
