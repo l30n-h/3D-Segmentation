@@ -19,7 +19,7 @@ renderer.setPixelRatio(window.devicePixelRatio);
 renderSurface.appendChild(renderer.domElement);
 
 var needsRerendering = true;
-var boxSize = 0.95;
+var voxelSize = 1;
 
 
 function VoxelMap() {
@@ -82,14 +82,9 @@ function VoxelMap() {
 }
 
 function VertexGeometry() {
+	var boxSize = voxelSize;
 	var cubes = true;
 	var vboMap = new VoxelMap();
-
-	var boxGeo = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
-	boxGeo.faceVertexUvs = [[]]; var v = { x: 0, y: 0, z: 0 }
-	boxGeo.faces.forEach(f => f.vertexNormals = [])
-
-	var matrix = new THREE.Matrix4();
 
 	this.add = (position) => {
 		var p = getVBOPosition(position);
@@ -107,9 +102,6 @@ function VertexGeometry() {
 	}
 
 	this.dispose = () => {
-		boxGeo.dispose();
-		boxGeo = null;
-		matrix = null;
 		vboMap.clear();
 		vboMap = null;
 	}
@@ -240,11 +232,19 @@ function raycastClicked(position) {
 	var vp = pointToVoxel(position);
 	if (clickType == "floodfill") {
 		setTimeout(() => {
-			var marked = floodFill((x,y,z)=>{
-				var v = voxels.get(x,y,z);
-				if(!v)return false;
-				return v.sx>0.7;
-			}, vp.x, vp.y, vp.z);
+			var marked = floodFill((p, p1) => {
+				// var v = voxels.get(x, y, z);
+				// if (!v) return false;
+				// return v.value > 0;
+
+				var v1 = voxels.get(p.x, p.y, p.z);
+				if (!v1) return false;
+				var v2 = voxels.get(p1.x, p1.y, p1.z);
+				if (!v2) return false;
+				var dot = v1.sx * v2.sx + v1.sy * v2.sy + v1.sz * v2.sz;
+				return dot >= 0.98;
+			}, vp);
+			// var marked = faceLinking(voxels);
 			for (var key of marked.keys()) {
 				voxels.getByKey(key)["marked"] = true;
 			}
@@ -256,11 +256,12 @@ function raycastClicked(position) {
 }
 
 function pointToVoxel(p) {
-	var hbs = boxSize / 2;
+	var vsh = voxelSize/2-0.01;
+	
 	return {
-		x: Math.floor(p.x + hbs),
-		y: Math.floor(p.y + hbs),
-		z: Math.floor(p.z + hbs)
+		x: Math.floor(p.x + vsh),
+		y: Math.floor(p.y + vsh),
+		z: Math.floor(p.z + vsh)
 	};
 }
 
@@ -325,9 +326,9 @@ function render() {
 		var getVoxel = (x, y, z) => {
 			return voxels.get(x, y, z);
 		}
-		var hbs = boxSize / 2;
-		var min = { x: voxelsBounds.min.x - hbs, y: voxelsBounds.min.y - hbs, z: voxelsBounds.min.z - hbs };
-		var max = { x: voxelsBounds.max.x + hbs, y: voxelsBounds.max.y + hbs, z: voxelsBounds.max.z + hbs };
+		var vsh = voxelSize/2;
+		var min = { x: voxelsBounds.min.x - vsh, y: voxelsBounds.min.y - vsh, z: voxelsBounds.min.z - vsh };
+		var max = { x: voxelsBounds.max.x + vsh, y: voxelsBounds.max.y + vsh, z: voxelsBounds.max.z + vsh };
 		var hit = raycast(getVoxel, raycaster.ray.origin, raycaster.ray.direction, min, max);
 		if (hit) {
 			var vp = pointToVoxel(hit.position);
@@ -574,7 +575,6 @@ function sobel3D(voxels) {
 function sobel1D(voxels, axis) {
 	var kernelDiff = [1, 0, -1];
 	var kernelBlur = [1, 2, 1];
-
 	if (axis == "x") {
 		var nvoxels = korrelation1D(voxels, kernelBlur, "z");
 		var nvoxels2 = korrelation1D(nvoxels, kernelBlur, "y"); nvoxels.clear();
@@ -1018,19 +1018,23 @@ function count8NeighbourAt(f, x, y, z) {
 	return n;
 }
 
-function floodFill(shouldBeMarked, x, y, z) {
+function floodFill(shouldBeMarked, p) {
 	var marked = new VoxelMap();
 	var stack = [];
-	stack.push({ x: x, y: y, z: z });
+	stack.push({ p: { x: p.x, y: p.y, z: p.z }, l: { x: p.x, y: p.y, z: p.z } });
 	while (stack.length > 0) {
-		var p = stack.pop();
-		if (!marked.get(p.x, p.y, p.z) && shouldBeMarked(p.x,p.y,p.z)) {
-			marked.set(p.x, p.y, p.z, true);
-			for (var nx = p.x - 1; nx <= p.x + 1; nx++) {
-				for (var ny = p.y - 1; ny <= p.y + 1; ny++) {
-					for (var nz = p.z - 1; nz <= p.z + 1; nz++) {
-						if (nx != p.x || ny != p.y || nz != p.z) {
-							stack.push({ x: nx, y: ny, z: nz });
+		var e = stack.pop();
+		var p = e.p;
+		if (!marked.get(p.x, p.y, p.z)) {
+			var sbm = shouldBeMarked(e.p, e.l);
+			if (sbm) {
+				marked.set(p.x, p.y, p.z, true);
+				for (var nx = p.x - 1; nx <= p.x + 1; nx++) {
+					for (var ny = p.y - 1; ny <= p.y + 1; ny++) {
+						for (var nz = p.z - 1; nz <= p.z + 1; nz++) {
+							if (nx != p.x || ny != p.y || nz != p.z) {
+								stack.push({ p: { x: nx, y: ny, z: nz }, l: { x: p.x, y: p.y, z: p.z } });
+							}
 						}
 					}
 				}
@@ -1040,6 +1044,23 @@ function floodFill(shouldBeMarked, x, y, z) {
 	return marked;
 }
 
+
+function binarySearch(ar, el, compare_fn) {
+	var m = 0;
+	var n = ar.length - 1;
+	while (m <= n) {
+		var k = (n + m) >> 1;
+		var cmp = compare_fn(el, ar[k]);
+		if (cmp > 0) {
+			m = k + 1;
+		} else if (cmp < 0) {
+			n = k - 1;
+		} else {
+			return k;
+		}
+	}
+	return -m - 1;
+}
 
 function updateHistogram(container) {
 	var hist = new Array(256).fill(0);
@@ -1053,10 +1074,10 @@ function updateHistogram(container) {
 		histG[Math.floor(c.g)]++;
 		histB[Math.floor(c.b)]++;
 	}
-	var max = 100/Math.max(...hist);
-	var maxR = 100/Math.max(...histR);
-	var maxG = 100/Math.max(...histG);
-	var maxB = 100/Math.max(...histB);
+	var max = 100 / Math.max(...hist);
+	var maxR = 100 / Math.max(...histR);
+	var maxG = 100 / Math.max(...histG);
+	var maxB = 100 / Math.max(...histB);
 	var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 	svg.setAttribute('width', '100%');
 	svg.setAttribute('height', '300px');
@@ -1064,16 +1085,16 @@ function updateHistogram(container) {
 	var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
 	g.setAttribute('transform', 'translate(0,100) scale(1,-1)');
 	var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polyline.setAttribute('points', hist.map((v, i) => i + "," + v*max).concat(" "));
+	polyline.setAttribute('points', hist.map((v, i) => i + "," + v * max).concat(" "));
 	polyline.setAttribute('style', 'fill:none;stroke:black;stroke-width:1');
 	var polylineR = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polylineR.setAttribute('points', histR.map((v, i) => i + "," + v*maxR).concat(" "));
+	polylineR.setAttribute('points', histR.map((v, i) => i + "," + v * maxR).concat(" "));
 	polylineR.setAttribute('style', 'fill:none;stroke:red;stroke-width:1');
 	var polylineG = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polylineG.setAttribute('points', histG.map((v, i) => i + "," + v*maxG).concat(" "));
+	polylineG.setAttribute('points', histG.map((v, i) => i + "," + v * maxG).concat(" "));
 	polylineG.setAttribute('style', 'fill:none;stroke:green;stroke-width:1');
 	var polylineB = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polylineB.setAttribute('points', histB.map((v, i) => i + "," + v*maxB).concat(" "));
+	polylineB.setAttribute('points', histB.map((v, i) => i + "," + v * maxB).concat(" "));
 	polylineB.setAttribute('style', 'fill:none;stroke:blue;stroke-width:1');
 	g.appendChild(polyline);
 	g.appendChild(polylineR);
@@ -1086,19 +1107,19 @@ function updateHistogram(container) {
 	var cb = document.createElement('input');
 	cb.setAttribute('type', 'checkbox');
 	cb.checked = true;
-	cb.addEventListener('click',((e)=>polyline.setAttribute('visibility', cb.checked?'visible':'hidden')));
+	cb.addEventListener('click', ((e) => polyline.setAttribute('visibility', cb.checked ? 'visible' : 'hidden')));
 	var cbR = document.createElement('input');
 	cbR.setAttribute('type', 'checkbox');
 	cbR.checked = true;
-	cbR.addEventListener('click',((e)=>polylineR.setAttribute('visibility', cbR.checked?'visible':'hidden')));
+	cbR.addEventListener('click', ((e) => polylineR.setAttribute('visibility', cbR.checked ? 'visible' : 'hidden')));
 	var cbG = document.createElement('input');
 	cbG.setAttribute('type', 'checkbox');
 	cbG.checked = true;
-	cbG.addEventListener('click',((e)=>polylineG.setAttribute('visibility', cbG.checked?'visible':'hidden')));
+	cbG.addEventListener('click', ((e) => polylineG.setAttribute('visibility', cbG.checked ? 'visible' : 'hidden')));
 	var cbB = document.createElement('input');
 	cbB.setAttribute('type', 'checkbox');
 	cbB.checked = true;
-	cbB.addEventListener('click',((e)=>polylineB.setAttribute('visibility', cbB.checked?'visible':'hidden')));
+	cbB.addEventListener('click', ((e) => polylineB.setAttribute('visibility', cbB.checked ? 'visible' : 'hidden')));
 
 	div.appendChild(document.createTextNode("Grey:"))
 	div.appendChild(cb);
@@ -1187,7 +1208,7 @@ function nextVoxel(p, d) {
 	var difx = vp.x + Math.sign(d.x) / 2 - p.x;
 	var dify = vp.y + Math.sign(d.y) / 2 - p.y;
 	var difz = vp.z + Math.sign(d.z) / 2 - p.z;
-	var min = Math.min(difx / d.x, dify / d.y, difz / d.z) + 0.5;//TODO fix min=0
+	var min = Math.max(Math.min(difx / d.x, dify / d.y, difz / d.z), 0.06);
 	return { position: { x: p.x + d.x * min, y: p.y + d.y * min, z: p.z + d.z * min }, t: min };
 }
 
