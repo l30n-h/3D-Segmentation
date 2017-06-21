@@ -256,8 +256,8 @@ function raycastClicked(position) {
 }
 
 function pointToVoxel(p) {
-	var vsh = voxelSize/2-0.01;
-	
+	var vsh = voxelSize / 2 - 0.01;
+
 	return {
 		x: Math.floor(p.x + vsh),
 		y: Math.floor(p.y + vsh),
@@ -326,7 +326,7 @@ function render() {
 		var getVoxel = (x, y, z) => {
 			return voxels.get(x, y, z);
 		}
-		var vsh = voxelSize/2;
+		var vsh = voxelSize / 2;
 		var min = { x: voxelsBounds.min.x - vsh, y: voxelsBounds.min.y - vsh, z: voxelsBounds.min.z - vsh };
 		var max = { x: voxelsBounds.max.x + vsh, y: voxelsBounds.max.y + vsh, z: voxelsBounds.max.z + vsh };
 		var hit = raycast(getVoxel, raycaster.ray.origin, raycaster.ray.direction, min, max);
@@ -548,10 +548,10 @@ function korrelation3D(voxels, kernel) {
 	return korrelation1D(nvoxels2, kernel, "z", nvoxels);
 }
 
-function sobel3D(voxels) {
-	var sx = sobel1D(voxels, "x");
-	var sy = sobel1D(voxels, "y");
-	var sz = sobel1D(voxels, "z");
+function sobel3D(voxels, blur = true) {
+	var sx = sobel1D(voxels, "x", blur);
+	var sy = sobel1D(voxels, "y", blur);
+	var sz = sobel1D(voxels, "z", blur);
 	var nvoxels = new VoxelMap();
 	function merge(s, name, out) {
 		for (var e of s.entries()) {
@@ -572,22 +572,28 @@ function sobel3D(voxels) {
 	return nvoxels;
 }
 
-function sobel1D(voxels, axis) {
-	var kernelDiff = [1, 0, -1];
-	var kernelBlur = [1, 2, 1];
-	if (axis == "x") {
-		var nvoxels = korrelation1D(voxels, kernelBlur, "z");
-		var nvoxels2 = korrelation1D(nvoxels, kernelBlur, "y"); nvoxels.clear();
-		return korrelation1D(nvoxels2, kernelDiff, "x", nvoxels);
-	} else if (axis == "y") {
-		var nvoxels = korrelation1D(voxels, kernelBlur, "x");
-		var nvoxels2 = korrelation1D(nvoxels, kernelBlur, "z"); nvoxels.clear();
-		return korrelation1D(nvoxels2, kernelDiff, "y", nvoxels);
+function sobel1D(voxels, axis, blur = true) {
+	var nvoxels, nvoxels2;
+	if (blur) {
+		var kernelBlur = [1, 2, 1];
+		if (axis == "x") {
+			nvoxels = korrelation1D(voxels, kernelBlur, "z");
+			nvoxels2 = korrelation1D(nvoxels, kernelBlur, "y"); nvoxels.clear();
+		} else if (axis == "y") {
+			nvoxels = korrelation1D(voxels, kernelBlur, "x");
+			nvoxels2 = korrelation1D(nvoxels, kernelBlur, "z"); nvoxels.clear();
+		} else {
+			nvoxels = korrelation1D(voxels, kernelBlur, "y");
+			nvoxels2 = korrelation1D(nvoxels, kernelBlur, "x"); nvoxels.clear();
+		}
 	} else {
-		var nvoxels = korrelation1D(voxels, kernelBlur, "y");
-		var nvoxels2 = korrelation1D(nvoxels, kernelBlur, "x"); nvoxels.clear();
-		return korrelation1D(nvoxels2, kernelDiff, "z", nvoxels);
+		nvoxels2 = voxels;
+		nvoxels = new VoxelMap();
 	}
+	var kernelDiff = [1, 0, -1];
+	if (axis == "x") return korrelation1D(nvoxels2, kernelDiff, "x", nvoxels);
+	if (axis == "y") return korrelation1D(nvoxels2, kernelDiff, "y", nvoxels);
+	return korrelation1D(nvoxels2, kernelDiff, "z", nvoxels);
 }
 
 function normalizeGradients(voxels) {
@@ -700,7 +706,35 @@ function toTensor(kernel1D) {
 	return out;
 }
 
-function toVoxels(file, rSize, filter = "") {
+function filter(filter = "") {
+	setTimeout(() => {
+		//voxels = toLog(toAmplitude(FFT3d(voxels, rasterSize,rasterSize,rasterSize)));
+		//voxels = toAmplitude(FFT3d(FFT3d(voxels, rasterSize,rasterSize,rasterSize),rasterSize,rasterSize,rasterSize, true));
+		console.log(voxels.size());
+		if (filter == "gauss") {
+			console.log('gauss start');
+			var fvoxels = gauss3D(voxels);
+			console.log(fvoxels.size())
+			voxels.clear();
+			for (var e of fvoxels.entries()) {
+				var v = e[1].value;
+				if (Math.abs(v) > 0.001) voxels.setByKey(e[0], { value: v });
+			}
+			console.log('gauss done');
+		} else if (filter.startsWith("sobel")) {
+			console.log('sobel start');
+			voxels = normalizeGradients(sobel3D(voxels, !filter.endsWith("noblur")));
+			//voxels = avgGradients(voxels);
+			console.log(voxels.size())
+			console.log('sobel done');
+		} else {
+			//voxels = extendEdge(voxels, rasterSize);
+		}
+		loadScene();
+	}, 0);
+}
+
+function toVoxels(file, rSize) {
 	clean();
 	console.log("read start")
 	rasterSize = rSize;
@@ -736,28 +770,7 @@ function toVoxels(file, rSize, filter = "") {
 		}, function onComplete() {
 			console.log('read done');
 			setTimeout(() => {
-				//nvoxels = toLog(toAmplitude(FFT3d(nvoxels, rasterSize,rasterSize,rasterSize)));
-				//nvoxels = toAmplitude(FFT3d(FFT3d(nvoxels, rasterSize,rasterSize,rasterSize),rasterSize,rasterSize,rasterSize, true));
 				console.log(nvoxels.size());
-				if (filter == "gauss") {
-					console.log('gauss start');
-					var fvoxels = gauss3D(nvoxels);
-					console.log(fvoxels.size())
-					nvoxels.clear();
-					for (var e of fvoxels.entries()) {
-						var v = e[1].value;
-						if (Math.abs(v) > 0.001) nvoxels.setByKey(e[0], { value: v });
-					}
-					console.log('gauss done');
-				} else if (filter == "sobel") {
-					console.log('sobel start');
-					nvoxels = normalizeGradients(sobel3D(nvoxels));
-					//nvoxels = avgGradients(nvoxels);
-					console.log(nvoxels.size())
-					console.log('sobel done');
-				} else {
-					//nvoxels = extendEdge(nvoxels, rasterSize);
-				}
 				voxels = nvoxels;
 				loadScene();
 			}, 0);
@@ -765,14 +778,17 @@ function toVoxels(file, rSize, filter = "") {
 	});
 }
 
+document.getElementById('filterButton').onclick = function () {
+	filter(document.getElementById('filter').value)
+};
 
-document.getElementById('start').onclick = function () {
+document.getElementById('loadButton').onclick = function () {
 	var file = document.getElementById('infile').files[0];
 	if (!file) {
 		console.log('No file selected.');
 		return;
 	}
-	toVoxels(file, document.getElementById('raster').value, document.getElementById('filter').value);
+	toVoxels(file, document.getElementById('raster').value);
 };
 
 document.getElementById('colorType').onchange = function (evt) {
@@ -784,7 +800,7 @@ document.getElementById('clickType').onchange = function (evt) {
 	clickType = evt.target.value;
 };
 
-document.getElementById('save').onclick = function () {
+document.getElementById('saveButton').onclick = function () {
 	var text = "";
 	for (var e of voxels.entries()) {
 		var key = e[0];
@@ -1062,147 +1078,6 @@ function binarySearch(ar, el, compare_fn) {
 	return -m - 1;
 }
 
-function updateHistogram(container) {
-	var hist = new Array(256).fill(0);
-	var histR = new Array(256).fill(0);
-	var histG = new Array(256).fill(0);
-	var histB = new Array(256).fill(0);
-	for (var e of voxels.entries()) {
-		var c = getColor(voxels.getPosition(e[0]), e[1]);
-		hist[Math.floor((c.r + c.g + c.b) / 3)]++;
-		histR[Math.floor(c.r)]++;
-		histG[Math.floor(c.g)]++;
-		histB[Math.floor(c.b)]++;
-	}
-	var max = 100 / Math.max(...hist);
-	var maxR = 100 / Math.max(...histR);
-	var maxG = 100 / Math.max(...histG);
-	var maxB = 100 / Math.max(...histB);
-	var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-	svg.setAttribute('width', '100%');
-	svg.setAttribute('height', '300px');
-	svg.setAttribute('viewBox', '0 0 255 100');
-	var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-	g.setAttribute('transform', 'translate(0,100) scale(1,-1)');
-	var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polyline.setAttribute('points', hist.map((v, i) => i + "," + v * max).concat(" "));
-	polyline.setAttribute('style', 'fill:none;stroke:black;stroke-width:1');
-	var polylineR = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polylineR.setAttribute('points', histR.map((v, i) => i + "," + v * maxR).concat(" "));
-	polylineR.setAttribute('style', 'fill:none;stroke:red;stroke-width:1');
-	var polylineG = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polylineG.setAttribute('points', histG.map((v, i) => i + "," + v * maxG).concat(" "));
-	polylineG.setAttribute('style', 'fill:none;stroke:green;stroke-width:1');
-	var polylineB = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polylineB.setAttribute('points', histB.map((v, i) => i + "," + v * maxB).concat(" "));
-	polylineB.setAttribute('style', 'fill:none;stroke:blue;stroke-width:1');
-	g.appendChild(polyline);
-	g.appendChild(polylineR);
-	g.appendChild(polylineG);
-	g.appendChild(polylineB);
-	svg.appendChild(g);
-
-	var div = document.createElement('div');
-	div.setAttribute('style', 'display:flex;flex-direction:row');
-	var cb = document.createElement('input');
-	cb.setAttribute('type', 'checkbox');
-	cb.checked = true;
-	cb.addEventListener('click', ((e) => polyline.setAttribute('visibility', cb.checked ? 'visible' : 'hidden')));
-	var cbR = document.createElement('input');
-	cbR.setAttribute('type', 'checkbox');
-	cbR.checked = true;
-	cbR.addEventListener('click', ((e) => polylineR.setAttribute('visibility', cbR.checked ? 'visible' : 'hidden')));
-	var cbG = document.createElement('input');
-	cbG.setAttribute('type', 'checkbox');
-	cbG.checked = true;
-	cbG.addEventListener('click', ((e) => polylineG.setAttribute('visibility', cbG.checked ? 'visible' : 'hidden')));
-	var cbB = document.createElement('input');
-	cbB.setAttribute('type', 'checkbox');
-	cbB.checked = true;
-	cbB.addEventListener('click', ((e) => polylineB.setAttribute('visibility', cbB.checked ? 'visible' : 'hidden')));
-
-	div.appendChild(document.createTextNode("Grey:"))
-	div.appendChild(cb);
-	div.appendChild(document.createTextNode("Red:"))
-	div.appendChild(cbR);
-	div.appendChild(document.createTextNode("Green:"))
-	div.appendChild(cbG);
-	div.appendChild(document.createTextNode("Blue:"))
-	div.appendChild(cbB);
-
-	while (container.firstChild) container.removeChild(container.firstChild);
-	container.appendChild(svg);
-	container.appendChild(div);
-}
-
-/*setTimeout(() => {
-	console.log("start")
-	var vm = new VoxelMap();
-	vm.set(0,0,0,"a");
-	vm.set(0,18,0,"b");
-	vm.set(10,0,97,"c");
-	vm.set(14,5,33,"d");
-	console.log(vm.keys());
-	for(var e of vm.entries()){
-		console.log(e);
-	}
-	var co = 100;
-	for (var x = 0; x < co; x++) {
-		for (var y = 0; y < co; y++) {
-			for (var z = 0; z < co; z++) {
-				vm.get(x, y, z)
-			}
-		}
-	}
-	console.log("done")
-}, 0);
-*/
-/*
-var Octree = function (s) {
-	var size = nextPowerOf2(s);
-
-	var Node = function (p, s) {
-		var size = s;
-		var pivot = p+size/2;
-		var data=null;
-		var nodes;
-
-		var get = (x,y,z) => {
-			if(!nodes) return null;
-			if(size<=1) return data;
-			var index = getIndex(x,y,z);
-			if(!nodes[index])return null;
-			return nodes[index].get(x,y,z);
-			
-		}
-
-		function getIndex(x,y,z){
-			return ((x < pivot ? 0 : 1) + (y > pivot ? 0 : 4) + (z < pivot ? 0: 2));
-		}
-	}
-
-	var root = new Node(0,size/2);
-
-
-	var get = (x,y,z) => {
-		if(isInBounds(x,y,z)){
-			return root.get(x,y,z);
-		}
-		return undefined;
-	}
-
-	var isInBounds = (x,y,z) => {
-		return x>=0 && x<size && y>=0 && y<size && z>=0 && z<size;
-	}
-
-	function nextPowerOf2(a) {
-		var b = 1;
-		while (b < a) b = b << 1;
-		return b;
-	}
-}
-*/
-
 function nextVoxel(p, d) {
 	var vp = pointToVoxel(p);
 	var difx = vp.x + Math.sign(d.x) / 2 - p.x;
@@ -1281,4 +1156,80 @@ function intersectsRayAABB(p, d, min, max) {
 		tmax = tzmax;
 
 	return { tmin, tmax };
-} 
+}
+
+
+
+
+function updateHistogram(container) {
+	var hist = new Array(256).fill(0);
+	var histR = new Array(256).fill(0);
+	var histG = new Array(256).fill(0);
+	var histB = new Array(256).fill(0);
+	for (var e of voxels.entries()) {
+		var c = getColor(voxels.getPosition(e[0]), e[1]);
+		hist[Math.floor((c.r + c.g + c.b) / 3)]++;
+		histR[Math.floor(c.r)]++;
+		histG[Math.floor(c.g)]++;
+		histB[Math.floor(c.b)]++;
+	}
+	var max = 100 / Math.max(...hist);
+	var maxR = 100 / Math.max(...histR);
+	var maxG = 100 / Math.max(...histG);
+	var maxB = 100 / Math.max(...histB);
+	var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	svg.setAttribute('width', '100%');
+	svg.setAttribute('height', '300px');
+	svg.setAttribute('viewBox', '0 0 255 100');
+	var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+	g.setAttribute('transform', 'translate(0,100) scale(1,-1)');
+	var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+	polyline.setAttribute('points', hist.map((v, i) => i + "," + v * max).concat(" "));
+	polyline.setAttribute('style', 'fill:none;stroke:black;stroke-width:1');
+	var polylineR = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+	polylineR.setAttribute('points', histR.map((v, i) => i + "," + v * maxR).concat(" "));
+	polylineR.setAttribute('style', 'fill:none;stroke:red;stroke-width:1');
+	var polylineG = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+	polylineG.setAttribute('points', histG.map((v, i) => i + "," + v * maxG).concat(" "));
+	polylineG.setAttribute('style', 'fill:none;stroke:green;stroke-width:1');
+	var polylineB = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+	polylineB.setAttribute('points', histB.map((v, i) => i + "," + v * maxB).concat(" "));
+	polylineB.setAttribute('style', 'fill:none;stroke:blue;stroke-width:1');
+	g.appendChild(polyline);
+	g.appendChild(polylineR);
+	g.appendChild(polylineG);
+	g.appendChild(polylineB);
+	svg.appendChild(g);
+
+	var div = document.createElement('div');
+	div.setAttribute('style', 'display:flex;flex-direction:row');
+	var cb = document.createElement('input');
+	cb.setAttribute('type', 'checkbox');
+	cb.checked = true;
+	cb.addEventListener('click', ((e) => polyline.setAttribute('visibility', cb.checked ? 'visible' : 'hidden')));
+	var cbR = document.createElement('input');
+	cbR.setAttribute('type', 'checkbox');
+	cbR.checked = true;
+	cbR.addEventListener('click', ((e) => polylineR.setAttribute('visibility', cbR.checked ? 'visible' : 'hidden')));
+	var cbG = document.createElement('input');
+	cbG.setAttribute('type', 'checkbox');
+	cbG.checked = true;
+	cbG.addEventListener('click', ((e) => polylineG.setAttribute('visibility', cbG.checked ? 'visible' : 'hidden')));
+	var cbB = document.createElement('input');
+	cbB.setAttribute('type', 'checkbox');
+	cbB.checked = true;
+	cbB.addEventListener('click', ((e) => polylineB.setAttribute('visibility', cbB.checked ? 'visible' : 'hidden')));
+
+	div.appendChild(document.createTextNode("Grey:"))
+	div.appendChild(cb);
+	div.appendChild(document.createTextNode("Red:"))
+	div.appendChild(cbR);
+	div.appendChild(document.createTextNode("Green:"))
+	div.appendChild(cbG);
+	div.appendChild(document.createTextNode("Blue:"))
+	div.appendChild(cbB);
+
+	while (container.firstChild) container.removeChild(container.firstChild);
+	container.appendChild(svg);
+	container.appendChild(div);
+}

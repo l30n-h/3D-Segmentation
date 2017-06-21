@@ -23,14 +23,17 @@
 	<div style="display:flex; flex-direction:column; height:100vh">
 		<div style="display:flex; flex-direction:row; align-items:center">
 			Read .obj:<input type="file" id="infile"> Gridsize:
-			<input type="number" id="raster" value="100"> Filter: <select id="filter">
+			<input type="number" id="raster" value="100">
+			<input type="button" id="loadButton" value="Load"> Filter:
+			<select id="filter">
 					<option value="" selected>-</option>
 					<option value="gauss">Gauss</option>
 					<option value="sobel">Sobel</option>
+					<option value="sobelnoblur">Sobel no blur</option>
 				</select>
-			<input type="button" id="start" value="Submit"> Save:
+			<input type="button" id="filterButton" value="Submit"> Save:
 
-			<input type="button" id="save" value="Save"> Color:
+			<input type="button" id="saveButton" value="Save"> Color:
 
 			<select id="colorType">
 					<option value="xyz" selected>Position</option>
