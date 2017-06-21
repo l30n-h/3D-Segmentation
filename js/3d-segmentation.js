@@ -240,7 +240,11 @@ function raycastClicked(position) {
 	var vp = pointToVoxel(position);
 	if (clickType == "floodfill") {
 		setTimeout(() => {
-			var marked = floodFill(voxels, vp.x, vp.y, vp.z);
+			var marked = floodFill((x,y,z)=>{
+				var v = voxels.get(x,y,z);
+				if(!v)return false;
+				return v.sx>0.7;
+			}, vp.x, vp.y, vp.z);
 			for (var key of marked.keys()) {
 				voxels.getByKey(key)["marked"] = true;
 			}
@@ -332,7 +336,7 @@ function render() {
 				if (!INTERSECTED || INTERSECTED["voxel"] != voxel) {
 					if (INTERSECTED) setColor(INTERSECTED["voxel"].cube, getColor(INTERSECTED["vp"], INTERSECTED["voxel"]));
 					INTERSECTED = {
-						voxel:voxel,
+						voxel: voxel,
 						vp: vp
 					};
 					setColor(voxel.cube, { r: 0, g: 255, b: 0 })
@@ -1014,14 +1018,13 @@ function count8NeighbourAt(f, x, y, z) {
 	return n;
 }
 
-function floodFill(f, x, y, z) {
+function floodFill(shouldBeMarked, x, y, z) {
 	var marked = new VoxelMap();
 	var stack = [];
 	stack.push({ x: x, y: y, z: z });
 	while (stack.length > 0) {
 		var p = stack.pop();
-		var v = f.get(p.x, p.y, p.z);
-		if (v && v.value != 0 && !marked.get(p.x, p.y, p.z)) {
+		if (!marked.get(p.x, p.y, p.z) && shouldBeMarked(p.x,p.y,p.z)) {
 			marked.set(p.x, p.y, p.z, true);
 			for (var nx = p.x - 1; nx <= p.x + 1; nx++) {
 				for (var ny = p.y - 1; ny <= p.y + 1; ny++) {
@@ -1037,6 +1040,79 @@ function floodFill(f, x, y, z) {
 	return marked;
 }
 
+
+function updateHistogram(container) {
+	var hist = new Array(256).fill(0);
+	var histR = new Array(256).fill(0);
+	var histG = new Array(256).fill(0);
+	var histB = new Array(256).fill(0);
+	for (var e of voxels.entries()) {
+		var c = getColor(voxels.getPosition(e[0]), e[1]);
+		hist[Math.floor((c.r + c.g + c.b) / 3)]++;
+		histR[Math.floor(c.r)]++;
+		histG[Math.floor(c.g)]++;
+		histB[Math.floor(c.b)]++;
+	}
+	var max = 100/Math.max(...hist);
+	var maxR = 100/Math.max(...histR);
+	var maxG = 100/Math.max(...histG);
+	var maxB = 100/Math.max(...histB);
+	var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	svg.setAttribute('width', '100%');
+	svg.setAttribute('height', '300px');
+	svg.setAttribute('viewBox', '0 0 255 100');
+	var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+	g.setAttribute('transform', 'translate(0,100) scale(1,-1)');
+	var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+	polyline.setAttribute('points', hist.map((v, i) => i + "," + v*max).concat(" "));
+	polyline.setAttribute('style', 'fill:none;stroke:black;stroke-width:1');
+	var polylineR = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+	polylineR.setAttribute('points', histR.map((v, i) => i + "," + v*maxR).concat(" "));
+	polylineR.setAttribute('style', 'fill:none;stroke:red;stroke-width:1');
+	var polylineG = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+	polylineG.setAttribute('points', histG.map((v, i) => i + "," + v*maxG).concat(" "));
+	polylineG.setAttribute('style', 'fill:none;stroke:green;stroke-width:1');
+	var polylineB = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+	polylineB.setAttribute('points', histB.map((v, i) => i + "," + v*maxB).concat(" "));
+	polylineB.setAttribute('style', 'fill:none;stroke:blue;stroke-width:1');
+	g.appendChild(polyline);
+	g.appendChild(polylineR);
+	g.appendChild(polylineG);
+	g.appendChild(polylineB);
+	svg.appendChild(g);
+
+	var div = document.createElement('div');
+	div.setAttribute('style', 'display:flex;flex-direction:row');
+	var cb = document.createElement('input');
+	cb.setAttribute('type', 'checkbox');
+	cb.checked = true;
+	cb.addEventListener('click',((e)=>polyline.setAttribute('visibility', cb.checked?'visible':'hidden')));
+	var cbR = document.createElement('input');
+	cbR.setAttribute('type', 'checkbox');
+	cbR.checked = true;
+	cbR.addEventListener('click',((e)=>polylineR.setAttribute('visibility', cbR.checked?'visible':'hidden')));
+	var cbG = document.createElement('input');
+	cbG.setAttribute('type', 'checkbox');
+	cbG.checked = true;
+	cbG.addEventListener('click',((e)=>polylineG.setAttribute('visibility', cbG.checked?'visible':'hidden')));
+	var cbB = document.createElement('input');
+	cbB.setAttribute('type', 'checkbox');
+	cbB.checked = true;
+	cbB.addEventListener('click',((e)=>polylineB.setAttribute('visibility', cbB.checked?'visible':'hidden')));
+
+	div.appendChild(document.createTextNode("Grey:"))
+	div.appendChild(cb);
+	div.appendChild(document.createTextNode("Red:"))
+	div.appendChild(cbR);
+	div.appendChild(document.createTextNode("Green:"))
+	div.appendChild(cbG);
+	div.appendChild(document.createTextNode("Blue:"))
+	div.appendChild(cbB);
+
+	while (container.firstChild) container.removeChild(container.firstChild);
+	container.appendChild(svg);
+	container.appendChild(div);
+}
 
 /*setTimeout(() => {
 	console.log("start")
@@ -1136,8 +1212,8 @@ function raycast(getVoxel, p, d, min, max) {
 	// m.position.set(vp.x, vp.y, vp.z)
 	// scene.add(new THREE.BoxHelper(m, 0xff0000));
 
-	var p = i; 
-	var maxIt = Math.abs(max.x-min.x)+Math.abs(max.y-min.y)+Math.abs(max.z-min.z);
+	var p = i;
+	var maxIt = Math.abs(max.x - min.x) + Math.abs(max.y - min.y) + Math.abs(max.z - min.z);
 	while (t <= r.tmax) {
 		if (maxIt-- < 0) break;
 		// m = new THREE.Mesh(wb, new THREE.MeshBasicMaterial(0x0000ff));
