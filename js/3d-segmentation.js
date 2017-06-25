@@ -22,7 +22,7 @@ var needsRerendering = true;
 var voxelSize = 1;
 
 
-function VoxelMap() {
+function VoxelMap(...values) {
 
 	var voxel = new Map();
 
@@ -62,6 +62,10 @@ function VoxelMap() {
 		return voxel.entries();
 	}
 
+	this.values = () => {
+		return voxel.values();
+	}
+
 	this.keys = () => {
 		return voxel.keys();
 	}
@@ -79,26 +83,41 @@ function VoxelMap() {
 	this.getKey = (x, y, z) => {
 		return x + "/" + y + "/" + z;
 	}
+
+	if (values) values.forEach((v) => this.set(v.x, v.y, v.z, v));
 }
 
-function VertexGeometry() {
+function VertexGeometry(cubes = true) {
 	var boxSize = voxelSize;
-	var cubes = true;
 	var vboMap = new VoxelMap();
 
-	this.add = (position) => {
+	this.add = (position, voxel) => {
 		var p = getVBOPosition(position);
 		var vbo = vboMap.get(p.x, p.y, p.z);
 		if (!vbo) {
 			vbo = { vertices: [], colors: [], geo: new THREE.BufferGeometry() };
-			vbo.geo["isCube"] = cubes;
 			vboMap.set(p.x, p.y, p.z, vbo);
 		}
 		var vboIndex = Math.floor(vbo.vertices.length / 3);
-		if (cubes) vboIndex *= 8;
-		vbo.vertices.push(position.x, position.y, position.z);
+		var vboLength;
+		if (cubes) {
+			vboIndex *= 8;
+			vboLength = 8;
+			vbo.vertices.push(position.x, position.y, position.z);
+		} else {
+			if (voxel.vertices) {
+				vboLength = voxel.vertices.length;
+				voxel.vertices.forEach(v => {
+					vbo.vertices.push(v.x, v.y, v.z);
+					vbo.colors.push(1, 0, 0);
+				});
+			} else {
+				vboLength = 1;
+				vbo.vertices.push(position.x, position.y, position.z);
+			}
+		}
 		vbo.colors.push(1, 0, 0);
-		return { vbo: vbo.geo, vboIndex: vboIndex };
+		return { vbo: vbo.geo, vboIndex: vboIndex, vboLength };
 	}
 
 	this.dispose = () => {
@@ -222,8 +241,7 @@ function setColor(cube, color) {
 	var b = color.b / 255;
 	var colors = cube.vbo.getAttribute("color");
 	if (colors) {
-		if (cube.vbo.isCube) for (var c = 0; c < 8; c++) colors.setXYZ(cube.vboIndex + c, r, g, b);
-		else colors.setXYZ(cube.vboIndex, r, g, b);
+		for (var c = 0; c < cube.vboLength; c++) colors.setXYZ(cube.vboIndex + c, r, g, b);
 		colors.needsUpdate = true;
 	}
 }
@@ -403,20 +421,63 @@ window.addEventListener('resize', (event) => {
 	resize();
 }, false);
 
+window.addEventListener('keydown', (event) => {
+	if (event.key == "Shift") controls.deactivate();
+})
+
+window.addEventListener('keyup', (event) => {
+	if (event.key == "Shift") controls.activate();
+})
+
+renderSurface.addEventListener('mousedown', (event) => {
+	setMousePosition(event);
+}, false);
 renderSurface.addEventListener('mousemove', (event) => {
-	setMousePosition(event, "move");
+	setMousePosition(event);
 }, false);
 renderSurface.addEventListener('click', (event) => {
-	setMousePosition(event, "click");
+	setMousePosition(event);
 }, false);
 
+var mouseMin, mouseMax;
+
+var material = new THREE.LineBasicMaterial({ color: 0x0000ff });
+var geometry = new THREE.Geometry();
+var line = new THREE.Line(geometry, material);
+
 function setMousePosition(event, type) {
+	var x = ((event.pageX - renderSurface.offsetLeft) / getSurfaceWidth()) * 2 - 1;
+	var y = - ((event.pageY - renderSurface.offsetTop) / getSurfaceHeight()) * 2 + 1;
 	if (event.ctrlKey) {
-		if (doRaycast != "click") doRaycast = type;
-		mousePos.x = ((event.pageX - renderSurface.offsetLeft) / getSurfaceWidth()) * 2 - 1;
-		mousePos.y = - ((event.pageY - renderSurface.offsetTop) / getSurfaceHeight()) * 2 + 1;
-	}
+		if (doRaycast != "click") doRaycast = event.type;
+		mousePos.x = x;
+		mousePos.y = y;
+	} 
+	// else if (event.shiftKey && event.type=="click") {
+	// 	if (!mouseMin || !mouseMax) {
+	// 		mouseMin = { x, y };
+	// 		mouseMax = { x, y };		
+			
+	// 		scene.add(line)
+	// 	} else {
+	// 		mouseMin.x = Math.min(x, mouseMin.x);
+	// 		mouseMin.y = Math.min(y, mouseMin.y);
+	// 		mouseMax.x = Math.max(x, mouseMax.x);
+	// 		mouseMax.y = Math.max(y, mouseMax.y);
+	// 	}
+	// 	raycaster.setFromCamera( {x, y}, camera );
+	// 	var p = new THREE.Vector3().add(raycaster.ray.origin).addScaledVector(raycaster.ray.direction, 5);
+	// 	console.log(p);
+	// 	geometry.vertices.push(p);
+	// }
+
+	// if (event.type == "click" && event.button==1) {
+	// 	mouseMin = mouseMax = null;
+	// 	scene.removeChild(line);
+	// }
 }
+
+
 
 
 init();
@@ -463,14 +524,13 @@ function loadScene() {
 	var axisHelper = new THREE.AxisHelper(5);
 	scene.add(axisHelper);
 
-	var vGeometry = new VertexGeometry();
+	var vGeometry = new VertexGeometry(true);
 	var i = 0;
 	for (var e of voxels.entries()) {
 		var voxel = e[1];
 		var key = e[0];
 		var p = voxels.getPosition(key);
-		var cube = vGeometry.add(p);
-		voxel["index"] = i;
+		var cube = vGeometry.add(p, voxel);
 		voxel["cube"] = cube;
 		i++;
 	}
@@ -646,90 +706,59 @@ function avgGradients(voxels) {
 	return nvoxels;
 }
 
-function extendEdge(voxels, size) {
-	for (var e of voxels.entries()) {
-		var p = voxels.getPosition(e[0]);
-		var n200 = voxels.get(p.x - 2, p.y, p.z);
-		var n100 = voxels.get(p.x - 1, p.y, p.z);
-		var p200 = voxels.get(p.x + 2, p.y, p.z);
-		var p100 = voxels.get(p.x + 1, p.y, p.z);
+function extendEdge(voxels) {
+	var nvoxels = new VoxelMap();
+	var todo = new Set();
+	for (var [key, voxel] of voxels.entries()) {
+		nvoxels.setByKey(key, voxel);
+		var p = voxels.getPosition(key);
 
-		var n020 = voxels.get(p.x, p.y - 2, p.z);
-		var n010 = voxels.get(p.x, p.y - 1, p.z);
-		var p020 = voxels.get(p.x, p.y + 2, p.z);
-		var p010 = voxels.get(p.x, p.y + 1, p.z);
-
-		var n002 = voxels.get(p.x, p.y, p.z - 2);
-		var n001 = voxels.get(p.x, p.y, p.z - 1);
-		var p002 = voxels.get(p.x, p.y, p.z + 2);
-		var p001 = voxels.get(p.x, p.y, p.z + 1);
-
-		var value = 30;
-
-		if (n200 && !n100) {
-			voxels.set(p.x - 1, p.y, p.z, { value: value });
-		}
-		if (p200 && !p100) {
-			voxels.set(p.x + 1, p.y, p.z, { value: value });
-		}
-
-		if (n020 && !n010) {
-			voxels.set(p.x, p.y - 1, p.z, { value: value });
-		}
-		if (p020 && !p010) {
-			voxels.set(p.x, p.y + 1, p.z, { value: value });
-		}
-
-		if (n002 && !n001) {
-			voxels.set(p.x, p.y, p.z - 1, { value: value });
-		}
-		if (p002 && !p001) {
-			voxels.set(p.x, p.y, p.z + 1, { value: value });
-		}
-	}
-	return voxels;
-}
-
-function toTensor(kernel1D) {
-	var factor = kernel1D.reduce((pv, cv, arr) => pv + cv);
-	factor = 1 / (factor * factor * factor);
-	var out = [];
-	for (var x = 0; x < kernel1D.length; x++) {
-		out[x] = [];
-		for (var y = 0; y < kernel1D.length; y++) {
-			out[x][y] = [];
-			for (var z = 0; z < kernel1D.length; z++) {
-				out[x][y][z] = kernel1D[x] * kernel1D[y] * kernel1D[z] * factor;
+		for (var x = - 1; x <= 1; x++) {
+			for (var y = - 1; y <= 1; y++) {
+				for (var z = - 1; z <= 1; z++) {
+					if (x == 0 && y == 0 && z == 0) continue;
+					var k = voxels.getKey(p.x + x, p.y + y, p.z + z);
+					if (!voxels.getByKey(k)) todo.add(k);
+				}
 			}
 		}
 	}
-	return out;
+	for (var key of todo) {
+		var p = voxels.getPosition(key);
+		if(voxels.get(p.x-1,p.y,p.z) && voxels.get(p.x+1,p.y,p.z)
+		|| voxels.get(p.x,p.y-1,p.z) && voxels.get(p.x,p.y+1,p.z)
+		|| voxels.get(p.x,p.y,p.z-1) && voxels.get(p.x,p.y,p.z+1)
+		// || voxels.get(p.x-1,p.y-1,p.z-1) && voxels.get(p.x+1,p.y+1,p.z+1)
+		// || voxels.get(p.x+1,p.y-1,p.z-1) && voxels.get(p.x-1,p.y+1,p.z+1)
+		// || voxels.get(p.x-1,p.y+1,p.z-1) && voxels.get(p.x+1,p.y-1,p.z+1)
+		// || voxels.get(p.x-1,p.y-1,p.z+1) && voxels.get(p.x+1,p.y+1,p.z-1)
+		){
+			nvoxels.setByKey(key, { value: 100 });
+		}
+		
+	}
+	return nvoxels;
 }
 
 function filter(filter = "") {
 	setTimeout(() => {
-		//voxels = toLog(toAmplitude(FFT3d(voxels, rasterSize,rasterSize,rasterSize)));
-		//voxels = toAmplitude(FFT3d(FFT3d(voxels, rasterSize,rasterSize,rasterSize),rasterSize,rasterSize,rasterSize, true));
+		console.log("filter start")
 		console.log(voxels.size());
+		var nVoxels = voxels;
 		if (filter == "gauss") {
-			console.log('gauss start');
-			var fvoxels = gauss3D(voxels);
-			console.log(fvoxels.size())
-			voxels.clear();
-			for (var e of fvoxels.entries()) {
-				var v = e[1].value;
-				if (Math.abs(v) > 0.001) voxels.setByKey(e[0], { value: v });
+			nVoxels = gauss3D(voxels);
+			for (var [key, voxel] of nVoxels.entries()) {
+				if (Math.abs(voxel.value) <= 0.001) nVoxels.removeByKey(key);
 			}
-			console.log('gauss done');
 		} else if (filter.startsWith("sobel")) {
-			console.log('sobel start');
-			voxels = normalizeGradients(sobel3D(voxels, !filter.endsWith("noblur")));
-			//voxels = avgGradients(voxels);
-			console.log(voxels.size())
-			console.log('sobel done');
+			nVoxels = normalizeGradients(sobel3D(voxels, !filter.endsWith("noblur")));
+			//nVoxels = avgGradients(nVoxels);
 		} else {
-			//voxels = extendEdge(voxels, rasterSize);
+			nVoxels = extendEdge(voxels);
 		}
+		console.log("filter done")
+		console.log(nVoxels.size())
+		voxels = nVoxels;
 		loadScene();
 	}, 0);
 }
@@ -758,18 +787,26 @@ function toVoxels(file, rSize) {
 		readSomeLines(file, function (line) {
 			var match = vertexMatcher.exec(line)
 			if (match) {
-				var a = [];
+				var vertex = [];
+				var vertexClamped = [];
 				for (var i = 0; i < min.length; i++) {
-					var v = parseFloat(match[i + 1]);
-					a[i] = Math.floor((v - min[i]) * fac);
+					vertex[i] = (parseFloat(match[i + 1]) - min[i]) * fac;
+					vertexClamped[i] = Math.floor(vertex[i]);
 				}
-				var v = nvoxels.get(a[0], a[1], a[2]);
-				if (v) v.value++;
-				else nvoxels.set(a[0], a[1], a[2], { value: 10 });
+				vertex = { x: vertex[0], y: vertex[1], z: vertex[2] };
+				var voxel = nvoxels.get(vertexClamped[0], vertexClamped[1], vertexClamped[2]);
+				if (voxel) {
+					voxel.value++;
+					voxel.vertices.set(vertex.x, vertex.y, vertex.z, vertex);
+				}
+				else nvoxels.set(vertexClamped[0], vertexClamped[1], vertexClamped[2], { value: 10, vertices: new VoxelMap(vertex) });
 			}
 		}, function onComplete() {
 			console.log('read done');
 			setTimeout(() => {
+				for (var [key, voxel] of nvoxels.entries()) {
+					voxel.vertices = [...voxel.vertices.values()];
+				}
 				console.log(nvoxels.size());
 				voxels = nvoxels;
 				loadScene();

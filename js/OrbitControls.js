@@ -400,13 +400,38 @@ THREE.OrbitControls = function (object, domElement) {
 
 	}
 
-	this.domElement.addEventListener('contextmenu', function (event) { event.preventDefault(); }, false);
-	this.domElement.addEventListener('mousedown', onMouseDown, false);
-	this.domElement.addEventListener('mousewheel', onMouseWheel, false);
-	this.domElement.addEventListener('DOMMouseScroll', onMouseWheel, false); // firefox
-	window.addEventListener('keydown', onKeyDown, false);
-	window.addEventListener('keyup', onKeyUp, false);
+	function preventDefault(event) {
+		event.preventDefault();
+	}
 
+	var activated = false;
+	this.activate = function () {
+		if (!activated) {
+			this.domElement.addEventListener('contextmenu', preventDefault, false);
+			this.domElement.addEventListener('mousedown', onMouseDown, false);
+			this.domElement.addEventListener('mousewheel', onMouseWheel, false);
+			this.domElement.addEventListener('DOMMouseScroll', onMouseWheel, false); // firefox
+			window.addEventListener('keydown', onKeyDown, false);
+			window.addEventListener('keyup', onKeyUp, false);
+			activated = true;
+		}
+	}
+
+	this.deactivate = function () {
+		if (activated) {
+			this.domElement.removeEventListener('contextmenu', preventDefault);
+			this.domElement.removeEventListener('mousedown', onMouseDown);
+			this.domElement.removeEventListener('mousewheel', onMouseWheel);
+			this.domElement.removeEventListener('DOMMouseScroll', onMouseWheel); // firefox
+			window.removeEventListener('keydown', onKeyDown);
+			window.removeEventListener('keyup', onKeyUp);
+			document.removeEventListener('mousemove', onMouseMove);
+			document.removeEventListener('mouseup', onMouseUp);
+			activated = false;
+		}
+	}
+
+	this.activate();
 };
 
 THREE.OrbitControls.prototype = Object.create(THREE.EventDispatcher.prototype);
