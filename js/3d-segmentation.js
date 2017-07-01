@@ -194,6 +194,66 @@ function VertexGeometry(cubes = true) {
 	}
 }
 
+var material = new THREE.LineBasicMaterial({ color: 0x0000ff });
+var geometry = new THREE.Geometry();
+var line = new THREE.Line(geometry, material);
+
+function Frustum(eye, dir, up, near, far, top, bottom, right, left) {
+	dir = new THREE.Vector3().add(dir).normalize();
+	up = new THREE.Vector3().add(up);
+	var side = new THREE.Vector3().crossVectors(dir, up).normalize();
+	up.crossVectors(side, dir).normalize();
+	var vn = new THREE.Vector3().addScaledVector(dir, near);
+	var vf = new THREE.Vector3().addScaledVector(dir, far);
+	var vt = new THREE.Vector3().add(vn).addScaledVector(up, top);
+	var vb = new THREE.Vector3().add(vn).addScaledVector(up, bottom);
+	var vr = new THREE.Vector3().add(vn).addScaledVector(side, right);
+	var vl = new THREE.Vector3().add(vn).addScaledVector(side, left);
+	var nt = new THREE.Vector3().crossVectors(side, vt).normalize();
+	var nb = new THREE.Vector3().crossVectors(vb, side).normalize();
+	var nr = new THREE.Vector3().crossVectors(vr, up).normalize();
+	var nl = new THREE.Vector3().crossVectors(up, vl).normalize();
+	vn.add(eye);
+	vf.add(eye);
+	vt.add(eye);
+	vb.add(eye);
+	vr.add(eye);
+	vl.add(eye);
+
+	function dot(a, b) {
+		return a.x * b.x + a.y * b.y + a.z * b.z;
+	}
+
+	this.plane = {};
+	this.plane.near = { x: -dir.x, y: -dir.y, z: -dir.z, d: -dot(dir, vn) };
+	this.plane.far = { x: dir.x, y: dir.y, z: dir.z, d: dot(dir, vf) };
+	this.plane.top = { x: nt.x, y: nt.y, z: nt.z, d: dot(nt, vt) };
+	this.plane.bottom = { x: nb.x, y: nb.y, z: nb.z, d: dot(nb, vb) };
+	this.plane.right = { x: nr.x, y: nr.y, z: nr.z, d: dot(nr, vr) };
+	this.plane.left = { x: nl.x, y: nl.y, z: nl.z, d: dot(nl, vl) };
+	this.containsVoxel = (v, radius) => {
+		for (var pk of Object.keys(this.plane)) {
+			var p = this.plane[pk];
+			if (dot(v, p) > p.d + radius) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	this.getVoxels = (voxels) => {
+		var nvoxels = new VoxelMap();
+		var offset = Math.sqrt(Math.pow(voxelSize, 2) * 3) / 2;
+		for (var [key, voxel] of voxels.entries()) {
+			var p = voxels.getPosition(key);
+			if (this.containsVoxel(p, offset)) {
+				nvoxels.setByKey(key, voxel);
+			}
+		}
+		return nvoxels;
+	}
+}
+
 var voxels = new VoxelMap();
 var rasterSize;
 var colorType = document.getElementById('colorType').value;
@@ -437,7 +497,7 @@ renderSurface.addEventListener('mousedown', (event) => {
 	setMousePosition(event);
 	mouseDown = true;
 }, false);
-renderSurface.addEventListener('mouseup', (event) => {
+window.addEventListener('mouseup', (event) => {
 	mouseDown = false;
 }, false);
 renderSurface.addEventListener('mousemove', (event) => {
@@ -446,12 +506,6 @@ renderSurface.addEventListener('mousemove', (event) => {
 renderSurface.addEventListener('click', (event) => {
 	setMousePosition(event);
 }, false);
-
-var mouseMin, mouseMax;
-
-var material = new THREE.LineBasicMaterial({ color: 0x0000ff });
-var geometry = new THREE.Geometry();
-var line = new THREE.Line(geometry, material);
 
 function setMousePosition(event, type) {
 	var x = ((event.pageX - renderSurface.offsetLeft) / getSurfaceWidth()) * 2 - 1;
@@ -462,28 +516,19 @@ function setMousePosition(event, type) {
 		mousePos.x = x;
 		mousePos.y = y;
 	}
-	// else if (event.shiftKey && event.type=="click") {
-	// 	if (!mouseMin || !mouseMax) {
-	// 		mouseMin = { x, y };
-	// 		mouseMax = { x, y };		
 
-	// 		scene.add(line)
-	// 	} else {
-	// 		mouseMin.x = Math.min(x, mouseMin.x);
-	// 		mouseMin.y = Math.min(y, mouseMin.y);
-	// 		mouseMax.x = Math.max(x, mouseMax.x);
-	// 		mouseMax.y = Math.max(y, mouseMax.y);
-	// 	}
-	// 	raycaster.setFromCamera( {x, y}, camera );
-	// 	var p = new THREE.Vector3().add(raycaster.ray.origin).addScaledVector(raycaster.ray.direction, 5);
-	// 	console.log(p);
-	// 	geometry.vertices.push(p);
-	// }
-
-	// if (event.type == "click" && event.button==1) {
-	// 	mouseMin = mouseMax = null;
-	// 	scene.removeChild(line);
-	// }
+	else if (event.shiftKey && event.type == "click") {
+		var top = Math.tan(camera.fov / 360 * Math.PI) * camera.near;
+		var right = top * camera.aspect;
+		var frustum = new Frustum(camera.position, camera.getWorldDirection(),
+			camera.up, camera.near, camera.far, top, -top, right, -right
+		);
+		var nvoxels = frustum.getVoxels(voxels);
+		for (var key of nvoxels.keys()) {
+			voxels.getByKey(key)["marked"] = true;
+		}
+		updateColors();
+	}
 }
 
 
