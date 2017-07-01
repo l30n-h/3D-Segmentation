@@ -88,7 +88,7 @@ function VoxelMap(...values) {
 }
 
 function VertexGeometry(cubes = true) {
-	var boxSize = voxelSize;
+	var boxSize = voxelSize * 0 + 0.7;
 	var vboMap = new VoxelMap();
 
 	this.add = (position, voxel) => {
@@ -262,12 +262,15 @@ function raycastClicked(position) {
 				var dot = v1.sx * v2.sx + v1.sy * v2.sy + v1.sz * v2.sz;
 				return dot >= 0.98;
 			}, vp);
-			// var marked = faceLinking(voxels);
+
 			for (var key of marked.keys()) {
 				voxels.getByKey(key)["marked"] = true;
 			}
 			updateColors();
 		}, 0);
+	} else if (clickType == "mark") {
+		var voxel = voxels.get(vp.x, vp.y, vp.z);
+		if (voxel) voxel["marked"] = true;
 	} else {
 		console.log(voxels.get(vp.x, vp.y, vp.z))
 	}
@@ -429,8 +432,13 @@ window.addEventListener('keyup', (event) => {
 	if (event.key == "Shift") controls.activate();
 })
 
+var mouseDown = false;
 renderSurface.addEventListener('mousedown', (event) => {
 	setMousePosition(event);
+	mouseDown = true;
+}, false);
+renderSurface.addEventListener('mouseup', (event) => {
+	mouseDown = false;
 }, false);
 renderSurface.addEventListener('mousemove', (event) => {
 	setMousePosition(event);
@@ -449,15 +457,16 @@ function setMousePosition(event, type) {
 	var x = ((event.pageX - renderSurface.offsetLeft) / getSurfaceWidth()) * 2 - 1;
 	var y = - ((event.pageY - renderSurface.offsetTop) / getSurfaceHeight()) * 2 + 1;
 	if (event.ctrlKey) {
-		if (doRaycast != "click") doRaycast = event.type;
+		if (mouseDown) doRaycast = "click"
+		else if (doRaycast != "click") doRaycast = event.type;
 		mousePos.x = x;
 		mousePos.y = y;
-	} 
+	}
 	// else if (event.shiftKey && event.type=="click") {
 	// 	if (!mouseMin || !mouseMax) {
 	// 		mouseMin = { x, y };
 	// 		mouseMax = { x, y };		
-			
+
 	// 		scene.add(line)
 	// 	} else {
 	// 		mouseMin.x = Math.min(x, mouseMin.x);
@@ -725,19 +734,36 @@ function extendEdge(voxels) {
 	}
 	for (var key of todo) {
 		var p = voxels.getPosition(key);
-		if(voxels.get(p.x-1,p.y,p.z) && voxels.get(p.x+1,p.y,p.z)
-		|| voxels.get(p.x,p.y-1,p.z) && voxels.get(p.x,p.y+1,p.z)
-		|| voxels.get(p.x,p.y,p.z-1) && voxels.get(p.x,p.y,p.z+1)
-		// || voxels.get(p.x-1,p.y-1,p.z-1) && voxels.get(p.x+1,p.y+1,p.z+1)
-		// || voxels.get(p.x+1,p.y-1,p.z-1) && voxels.get(p.x-1,p.y+1,p.z+1)
-		// || voxels.get(p.x-1,p.y+1,p.z-1) && voxels.get(p.x+1,p.y-1,p.z+1)
-		// || voxels.get(p.x-1,p.y-1,p.z+1) && voxels.get(p.x+1,p.y+1,p.z-1)
-		){
-			nvoxels.setByKey(key, { value: 100 });
+		if (voxels.get(p.x - 1, p.y, p.z) && voxels.get(p.x + 1, p.y, p.z)
+			|| voxels.get(p.x, p.y - 1, p.z) && voxels.get(p.x, p.y + 1, p.z)
+			|| voxels.get(p.x, p.y, p.z - 1) && voxels.get(p.x, p.y, p.z + 1)
+
+			|| voxels.get(p.x - 1, p.y - 1, p.z - 1) && voxels.get(p.x + 1, p.y + 1, p.z + 1)
+			|| voxels.get(p.x + 1, p.y - 1, p.z - 1) && voxels.get(p.x - 1, p.y + 1, p.z + 1)
+			|| voxels.get(p.x - 1, p.y + 1, p.z - 1) && voxels.get(p.x + 1, p.y - 1, p.z + 1)
+			|| voxels.get(p.x - 1, p.y - 1, p.z + 1) && voxels.get(p.x + 1, p.y + 1, p.z - 1)
+
+		) {
+			nvoxels.setByKey(key, { value: 10 });
 		}
-		
+
 	}
 	return nvoxels;
+}
+
+function removeMarked(voxels) {
+	var nvoxels = new VoxelMap();
+	for (var [key, voxel] of voxels.entries()) {
+		if (!voxel.marked) nvoxels.setByKey(key, voxel)
+	}
+	return nvoxels;
+}
+
+function setAllValuesTo(voxels, value) {
+	for (var [key, voxel] of voxels.entries()) {
+		voxel.value = value;
+	}
+	return voxels;
 }
 
 function filter(filter = "") {
@@ -752,9 +778,14 @@ function filter(filter = "") {
 			}
 		} else if (filter.startsWith("sobel")) {
 			nVoxels = normalizeGradients(sobel3D(voxels, !filter.endsWith("noblur")));
-			//nVoxels = avgGradients(nVoxels);
-		} else {
+		} else if (filter.startsWith("remove")) {
+			nVoxels = removeMarked(voxels);
+		} else if (filter.startsWith("makeallvaluessame")) {
+			nVoxels = setAllValuesTo(voxels, 10);
+		} else if (filter.startsWith("extendedges")) {
 			nVoxels = extendEdge(voxels);
+		} else if (filter.startsWith("avggradients")) {
+			nVoxels = avgGradients(nVoxels);
 		}
 		console.log("filter done")
 		console.log(nVoxels.size())
