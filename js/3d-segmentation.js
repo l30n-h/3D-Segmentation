@@ -139,19 +139,19 @@ function VertexGeometry(cubes = true) {
 	}
 
 	function getCubeMesh(vbo) {
-		var b = boxSize / 2;
+		var hbs = boxSize / 2;
 		var vertices = new Float32Array(vbo.vertices.length * 8);
 		for (var i = 0; i < vbo.vertices.length; i += 3) {
 			var x = vbo.vertices[i];
 			var y = vbo.vertices[i + 1];
 			var z = vbo.vertices[i + 2];
 			var i8 = i * 8;
-			vertices[i8] = vertices[i8 + 3] = vertices[i8 + 6] = vertices[i8 + 9] = x - b;
-			vertices[i8 + 1] = vertices[i8 + 4] = vertices[i8 + 13] = vertices[i8 + 16] = y - b;
-			vertices[i8 + 2] = vertices[i8 + 8] = vertices[i8 + 14] = vertices[i8 + 20] = z - b;
-			vertices[i8 + 12] = vertices[i8 + 15] = vertices[i8 + 18] = vertices[i8 + 21] = x + b;
-			vertices[i8 + 7] = vertices[i8 + 10] = vertices[i8 + 19] = vertices[i8 + 22] = y + b;
-			vertices[i8 + 5] = vertices[i8 + 11] = vertices[i8 + 17] = vertices[i8 + 23] = z + b;
+			vertices[i8] = vertices[i8 + 3] = vertices[i8 + 6] = vertices[i8 + 9] = x - hbs;
+			vertices[i8 + 1] = vertices[i8 + 4] = vertices[i8 + 13] = vertices[i8 + 16] = y - hbs;
+			vertices[i8 + 2] = vertices[i8 + 8] = vertices[i8 + 14] = vertices[i8 + 20] = z - hbs;
+			vertices[i8 + 12] = vertices[i8 + 15] = vertices[i8 + 18] = vertices[i8 + 21] = x + hbs;
+			vertices[i8 + 7] = vertices[i8 + 10] = vertices[i8 + 19] = vertices[i8 + 22] = y + hbs;
+			vertices[i8 + 5] = vertices[i8 + 11] = vertices[i8 + 17] = vertices[i8 + 23] = z + hbs;
 		}
 		var colors = new Float32Array(vbo.vertices.length * 8);
 		for (var i = 0; i < Math.min(vbo.colors.length, vbo.vertices.length); i += 3) {
@@ -265,21 +265,21 @@ var voxelsBounds = {
 };
 
 function getColor(p, voxel = null) {
-	if (!voxel) voxel = voxels.get(x, y, z);
-	var red = 0, green = 0, blue = 0;
+	if (!voxel) voxel = voxels.get(p.x, p.y, p.z);
+	var red = 0, green = 0, blue = 0, vc;
 	if (colorType == "xyz") {
 		red = incContrast(p.x, voxelsBounds.min.x, voxelsBounds.max.x, 30, 225);
 		green = incContrast(p.y, voxelsBounds.min.y, voxelsBounds.max.y, 30, 225);
 		blue = incContrast(p.z, voxelsBounds.min.z, voxelsBounds.max.z, 30, 225);
 	} else if (colorType == "value") {
-		var vc = incContrast(voxel.value, voxelsBounds.min.value, voxelsBounds.max.value, 30, 225);
+		vc = incContrast(voxel.value, voxelsBounds.min.value, voxelsBounds.max.value, 30, 225);
 		red = green = blue = vc;
 	} else if (colorType == "normal") {
 		red = incContrast(voxel["sx"] || 0, voxelsBounds.min.sx, voxelsBounds.max.sx, 30, 225);
 		green = incContrast(voxel["sy"] || 0, voxelsBounds.min.sy, voxelsBounds.max.sy, 30, 225);
 		blue = incContrast(voxel["sz"] || 0, voxelsBounds.min.sz, voxelsBounds.max.sz, 30, 225);
 	} else {
-		var vc = Math.round(Math.floor(incContrast(voxel.value, voxelsBounds.min.value, voxelsBounds.max.value, 30, 225) / 19.5) * 19.5);
+		vc = Math.round(Math.floor(incContrast(voxel.value, voxelsBounds.min.value, voxelsBounds.max.value, 30, 225) / 19.5) * 19.5);
 		red = green = blue = vc;
 	}
 	if (voxel.marked) {
@@ -458,7 +458,7 @@ var cumulatedFrameTime = 0; // ms
 var _lastFrameTime = Date.now(); // timestamp
 function loop() {
 	var time = Date.now();
-	timeDif = (time - _lastFrameTime);
+	var timeDif = (time - _lastFrameTime);
 	_lastFrameTime = time;
 	cumulatedFrameTime += timeDif;
 	var doRendering = cumulatedFrameTime >= framePeriod;
@@ -510,7 +510,7 @@ renderSurface.addEventListener('click', (event) => {
 	setMousePosition(event);
 }, false);
 
-function setMousePosition(event, type) {
+function setMousePosition(event) {
 	var x = ((event.pageX - renderSurface.offsetLeft) / getSurfaceWidth()) * 2 - 1;
 	var y = - ((event.pageY - renderSurface.offsetTop) / getSurfaceHeight()) * 2 + 1;
 	if (event.ctrlKey) {
@@ -873,13 +873,13 @@ function toVoxels(file, rSize) {
 		readSomeLines(file, function (line) {
 			var match = vertexMatcher.exec(line)
 			if (match) {
-				var vertex = [];
+				var vertexArr = [];
 				var vertexClamped = [];
 				for (var i = 0; i < min.length; i++) {
-					vertex[i] = (parseFloat(match[i + 1]) - min[i]) * fac;
-					vertexClamped[i] = Math.floor(vertex[i]);
+					vertexArr[i] = (parseFloat(match[i + 1]) - min[i]) * fac;
+					vertexClamped[i] = Math.floor(vertexArr[i]);
 				}
-				vertex = { x: vertex[0], y: vertex[1], z: vertex[2] };
+				var vertex = { x: vertexArr[0], y: vertexArr[1], z: vertexArr[2] };
 				var voxel = nvoxels.get(vertexClamped[0], vertexClamped[1], vertexClamped[2]);
 				if (voxel) {
 					voxel.value++;
@@ -936,14 +936,13 @@ document.getElementById('saveButton').onclick = function () {
 
 function readSomeLines(file, forEachLine, onComplete) {
 	var CHUNK_SIZE = 20000; // 50kb, arbitrarily chosen.
-	var decoder = new TextDecoder();
 	var offset = 0;
 	var results = '';
 	var fr = new FileReader();
 	fr.onload = function () {
 		// Use stream:true in case we cut the file
 		// in the middle of a multi-byte character
-		results += decoder.decode(fr.result, { stream: true });
+		results += fr.result;
 		var lines = results.split('\n');
 		results = lines.pop(); // In case the line did not end yet.
 
@@ -966,7 +965,7 @@ function readSomeLines(file, forEachLine, onComplete) {
 			return;
 		}
 		var slice = file.slice(offset, offset + CHUNK_SIZE);
-		fr.readAsArrayBuffer(slice);
+		fr.readAsText(slice);
 	}
 }
 
@@ -1149,7 +1148,7 @@ function count8NeighbourAt(f, x, y, z) {
 	for (var nx = x - 1; nx <= x + 1; nx++) {
 		for (var ny = y - 1; ny <= y + 1; ny++) {
 			for (var nz = z - 1; nz <= z + 1; nz++) {
-				var v = f.get(p.x, p.y, p.z);
+				var v = f.get(nx, ny, nz);
 				if (v && v.value != 0) n++;
 			}
 		}
@@ -1231,7 +1230,7 @@ function raycast(getVoxel, p, d, min, max) {
 	// m.position.set(vp.x, vp.y, vp.z)
 	// scene.add(new THREE.BoxHelper(m, 0xff0000));
 
-	var p = i;
+	var pI = i;
 	var maxIt = Math.abs(max.x - min.x) + Math.abs(max.y - min.y) + Math.abs(max.z - min.z);
 	while (t <= r.tmax) {
 		if (maxIt-- < 0) break;
@@ -1239,12 +1238,12 @@ function raycast(getVoxel, p, d, min, max) {
 		// m.position.set(vp.x, vp.y, vp.z)
 		// scene.add(new THREE.BoxHelper(m, 0x0000ff));
 
-		var vp = pointToVoxel(p);
+		var vp = pointToVoxel(pI);
 		if (getVoxel(vp.x, vp.y, vp.z)) {
 			return { position: vp };
 		}
-		var out = nextVoxel(p, d);
-		p = out.position;
+		var out = nextVoxel(pI, d);
+		pI = out.position;
 		t += out.t;
 	}
 	return false;
@@ -1307,16 +1306,16 @@ function updateHistogram(container) {
 	var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
 	g.setAttribute('transform', 'translate(0,100) scale(1,-1)');
 	var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polyline.setAttribute('points', hist.map((v, i) => i + "," + v * max).concat(" "));
+	polyline.setAttribute('points', hist.map((v, i) => i + "," + v * max).join(" "));
 	polyline.setAttribute('style', 'fill:none;stroke:black;stroke-width:1');
 	var polylineR = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polylineR.setAttribute('points', histR.map((v, i) => i + "," + v * maxR).concat(" "));
+	polylineR.setAttribute('points', histR.map((v, i) => i + "," + v * maxR).join(" "));
 	polylineR.setAttribute('style', 'fill:none;stroke:red;stroke-width:1');
 	var polylineG = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polylineG.setAttribute('points', histG.map((v, i) => i + "," + v * maxG).concat(" "));
+	polylineG.setAttribute('points', histG.map((v, i) => i + "," + v * maxG).join(" "));
 	polylineG.setAttribute('style', 'fill:none;stroke:green;stroke-width:1');
 	var polylineB = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polylineB.setAttribute('points', histB.map((v, i) => i + "," + v * maxB).concat(" "));
+	polylineB.setAttribute('points', histB.map((v, i) => i + "," + v * maxB).join(" "));
 	polylineB.setAttribute('style', 'fill:none;stroke:blue;stroke-width:1');
 	g.appendChild(polyline);
 	g.appendChild(polylineR);
