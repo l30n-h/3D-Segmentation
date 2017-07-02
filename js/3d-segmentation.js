@@ -21,6 +21,10 @@ renderSurface.appendChild(renderer.domElement);
 var needsRerendering = true;
 var voxelSize = 1;
 
+var material = new THREE.LineBasicMaterial({ color: 0x0000ff });
+var geometry = new THREE.Geometry();
+var line = new THREE.Line(geometry, material);
+
 
 function VoxelMap(...values) {
 
@@ -194,10 +198,6 @@ function VertexGeometry(cubes = true) {
 	}
 }
 
-var material = new THREE.LineBasicMaterial({ color: 0x0000ff });
-var geometry = new THREE.Geometry();
-var line = new THREE.Line(geometry, material);
-
 function Frustum(eye, dir, up, near, far, top, bottom, right, left) {
 	dir = new THREE.Vector3().add(dir).normalize();
 	up = new THREE.Vector3().add(up);
@@ -310,6 +310,7 @@ function raycastClicked(position) {
 	var vp = pointToVoxel(position);
 	if (clickType == "floodfill") {
 		setTimeout(() => {
+			var v2 = null
 			var marked = floodFill((p, p1) => {
 				// var v = voxels.get(x, y, z);
 				// if (!v) return false;
@@ -317,6 +318,7 @@ function raycastClicked(position) {
 
 				var v1 = voxels.get(p.x, p.y, p.z);
 				if (!v1) return false;
+				//if (v2 == null) v2 = v1;
 				var v2 = voxels.get(p1.x, p1.y, p1.z);
 				if (!v2) return false;
 				var dot = v1.sx * v2.sx + v1.sy * v2.sy + v1.sz * v2.sz;
@@ -332,7 +334,8 @@ function raycastClicked(position) {
 		var voxel = voxels.get(vp.x, vp.y, vp.z);
 		if (voxel) voxel["marked"] = true;
 	} else {
-		console.log(voxels.get(vp.x, vp.y, vp.z))
+		console.log(vp);
+		console.log(voxels.get(vp.x, vp.y, vp.z));
 	}
 }
 
@@ -777,16 +780,23 @@ function extendEdge(voxels) {
 			}
 		}
 	}
+	function hasNeighbour(voxels, p, dir, u) {
+		for (var s = 1; s <= u; s++) {
+			if (voxels.get(p.x + dir.x * s, p.y + dir.y * s, p.z + dir.z * s)) return true;
+		}
+		return false;
+	}
+	var u = 3;
 	for (var key of todo) {
 		var p = voxels.getPosition(key);
-		if (voxels.get(p.x - 1, p.y, p.z) && voxels.get(p.x + 1, p.y, p.z)
-			|| voxels.get(p.x, p.y - 1, p.z) && voxels.get(p.x, p.y + 1, p.z)
-			|| voxels.get(p.x, p.y, p.z - 1) && voxels.get(p.x, p.y, p.z + 1)
+		if (voxels.get(p.x - 1, p.y, p.z) && hasNeighbour(voxels, p, { x: 1, y: 0, z: 0 }, u)
+			|| voxels.get(p.x, p.y - 1, p.z) && hasNeighbour(voxels, p, { x: 0, y: 1, z: 0 }, u)
+			|| voxels.get(p.x, p.y, p.z - 1) && hasNeighbour(voxels, p, { x: 0, y: 0, z: 1 }, u)
 
-			|| voxels.get(p.x - 1, p.y - 1, p.z - 1) && voxels.get(p.x + 1, p.y + 1, p.z + 1)
-			|| voxels.get(p.x + 1, p.y - 1, p.z - 1) && voxels.get(p.x - 1, p.y + 1, p.z + 1)
-			|| voxels.get(p.x - 1, p.y + 1, p.z - 1) && voxels.get(p.x + 1, p.y - 1, p.z + 1)
-			|| voxels.get(p.x - 1, p.y - 1, p.z + 1) && voxels.get(p.x + 1, p.y + 1, p.z - 1)
+			|| voxels.get(p.x - 1, p.y - 1, p.z - 1) && hasNeighbour(voxels, p, { x: 1, y: 1, z: 1 }, u)
+			|| voxels.get(p.x + 1, p.y - 1, p.z - 1) && hasNeighbour(voxels, p, { x: -1, y: 1, z: 1 }, u)
+			|| voxels.get(p.x - 1, p.y + 1, p.z - 1) && hasNeighbour(voxels, p, { x: 1, y: -1, z: 1 }, u)
+			|| voxels.get(p.x - 1, p.y - 1, p.z + 1) && hasNeighbour(voxels, p, { x: 1, y: 1, z: -1 }, u)
 
 		) {
 			nvoxels.setByKey(key, { value: 10 });
